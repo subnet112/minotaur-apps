@@ -1,0 +1,3 @@
+[submodule "lib/minotaur_contracts"]
+	path = lib/minotaur_contracts
+	url = https://github.com/subnet112/minotaur_contracts.git

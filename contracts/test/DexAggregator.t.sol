@@ -1,0 +1,1366 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "forge-std/Test.sol";
+import "minotaur_contracts/src/AppIntentBase.sol";
+import "minotaur_contracts/src/ValidatorRegistry.sol";
+import "minotaur_contracts/src/EIP712Verifier.sol";
+import "../src/DexAggregatorApp.sol";
+import "./mocks/MockToken.sol";
+
+/// @title MockDex - Simulates a DEX router for DexAggregator tests
+/// @notice Pulls input token from msg.sender, sends output from its reserves.
+///         Rate is configurable. Used to test the app's token management flow.
+contract MockDex {
+    uint256 public rate = 1800; // 1 input = 1800 output (e.g., WETH→USDC)
+    uint8 public inputDecimals = 18;
+    uint8 public outputDecimals = 6;
+
+    function setRate(uint256 _rate) external {
+        rate = _rate;
+    }
+
+    function setDecimals(uint8 _inputDec, uint8 _outputDec) external {
+        inputDecimals = _inputDec;
+        outputDecimals = _outputDec;
+    }
+
+    /// @notice Swap: pull input from caller, send output to recipient
+    function swap(
+        address inputToken,
+        address outputToken,
+        uint256 inputAmount,
+        uint256 minOutput,
+        address recipient
+    ) external returns (uint256 outputAmount) {
+        IERC20(inputToken).transferFrom(msg.sender, address(this), inputAmount);
+
+        // Calculate output accounting for decimal difference
+        if (inputDecimals >= outputDecimals) {
+            outputAmount = (inputAmount * rate) / (10 ** (inputDecimals - outputDecimals));
+        } else {
+            outputAmount = (inputAmount * rate) * (10 ** (outputDecimals - inputDecimals));
+        }
+
+        require(outputAmount >= minOutput, "MockDex: insufficient output");
+        IERC20(outputToken).transfer(recipient, outputAmount);
+    }
+}
+
+contract DexAggregatorTest is Test {
+    DexAggregatorApp public app;
+    ValidatorRegistry public registry;
+    MockToken public weth;
+    MockToken public usdc;
+    MockDex public dex;
+
+    // Test accounts
+    address public relayerAddr;
+    uint256 public relayerKey;
+    address public userAddr;
+    uint256 public userKey;
+    address public feeCollector;
+
+    address[] public validatorAddrs;
+    uint256[] public validatorKeys;
+
+    bytes32 public DOMAIN_SEPARATOR;
+
+    function setUp() public {
+        // Deterministic accounts
+        (relayerAddr, relayerKey) = makeAddrAndKey("relayer");
+        (userAddr, userKey) = makeAddrAndKey("user");
+        feeCollector = makeAddr("feeCollector");
+
+        // 3 validators
+        for (uint256 i = 0; i < 3; i++) {
+            (address addr, uint256 key) = makeAddrAndKey(
+                string(abi.encodePacked("validator", vm.toString(i)))
+            );
+            validatorAddrs.push(addr);
+            validatorKeys.push(key);
+        }
+        _sortValidators();
+
+        // Deploy tokens
+        weth = new MockToken("Wrapped ETH", "WETH", 18);
+        usdc = new MockToken("USD Coin", "USDC", 6);
+
+        // Deploy DEX and fund with reserves
+        dex = new MockDex();
+        usdc.mint(address(dex), 100_000_000e6);
+
+        // Deploy registry + app
+        registry = new ValidatorRegistry(relayerAddr, validatorAddrs);
+        app = new DexAggregatorApp(
+            relayerAddr,
+            address(registry),
+            8000,  // quorumBps
+            5000,  // scoreThreshold
+            address(weth),   // wrappedNativeToken (WETH for platform fees)
+            relayerAddr,     // platformFeeCollector
+            0.1 ether,       // maxPlatformFeeWei
+            feeCollector,
+            5000   // feeBps: 50% of positive slippage
+        );
+
+        DOMAIN_SEPARATOR = app.DOMAIN_SEPARATOR();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     CONSTRUCTOR / ADMIN TESTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_constructor() public view {
+        assertEq(app.feeBps(), 5000);
+        assertEq(app.feeCollector(), feeCollector);
+        assertTrue(app.registeredIntents(app.SWAP_SELECTOR()));
+    }
+
+    function test_constructor_revert_zeroFeeCollector() public {
+        vm.expectRevert("Invalid fee collector");
+        new DexAggregatorApp(relayerAddr, address(registry), 8000, 5000, address(weth), relayerAddr, 0.1 ether, address(0), 5000);
+    }
+
+    function test_constructor_revert_feeTooHigh() public {
+        vm.expectRevert("Fee too high");
+        new DexAggregatorApp(relayerAddr, address(registry), 8000, 5000, address(weth), relayerAddr, 0.1 ether, feeCollector, 10001);
+    }
+
+    function test_setFeeCollector() public {
+        address newCollector = makeAddr("newCollector");
+        vm.prank(relayerAddr);
+        app.setFeeCollector(newCollector);
+        assertEq(app.feeCollector(), newCollector);
+    }
+
+    function test_setFeeCollector_revert_zero() public {
+        vm.prank(relayerAddr);
+        vm.expectRevert("Invalid fee collector");
+        app.setFeeCollector(address(0));
+    }
+
+    function test_setFeeBps() public {
+        vm.prank(relayerAddr);
+        app.setFeeBps(3000);
+        assertEq(app.feeBps(), 3000);
+    }
+
+    function test_setFeeBps_revert_tooHigh() public {
+        vm.prank(relayerAddr);
+        vm.expectRevert("Fee too high");
+        app.setFeeBps(10001);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     PLATFORM FEE TESTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_platformFee_collected() public {
+        // The platform fee is denominated in WETH wei but always taken from
+        // the swap OUTPUT (converted at the realised swap rate when the
+        // input is WETH, 1:1 when the output is WETH). The user only ever
+        // needs an allowance covering ``amountIn`` — never amountIn + fee
+        // — and there is no separate ``transferFrom`` for the fee.
+        //
+        // Two fees apply on a profitable swap and are deducted in order:
+        //   1. Platform fee  → ``platformFeeCollector`` (relayerAddr in this
+        //      test setup), denominated in WETH wei but paid in the output
+        //      token at the realised rate.
+        //   2. Positive-slippage fee → ``feeCollector``, computed on
+        //      (gained_after_platform_fee - minAmountOut) at ``feeBps``.
+        //   3. Whatever's left is delivered to the user.
+        dex.setRate(2000); // 1 WETH = 2000 USDC, surplus over minAmountOut
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        uint256 platformFee = 0.002 ether;
+
+        // KEY: user holds + approves only amountIn — no headroom for the fee.
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("platform_fee_swap");
+        bytes memory intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            platformFee,
+            false
+        );
+
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](2);
+        calls[0] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(dex), type(uint256).max))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(dex),
+            value: 0,
+            callData: abi.encodeCall(dex.swap, (
+                address(weth), address(usdc), amountIn, 0, address(app)
+            ))
+        });
+
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid, "swap must succeed with allowance == amountIn (no fee headroom)");
+
+        // Stage 1: platform fee in OUTPUT token (USDC), at the swap's rate.
+        // expected = (gained * platformFee) / amountIn
+        //          = (2000e6 * 0.002e18) / 1e18 = 4_000_000 (4 USDC)
+        uint256 expectedPlatformFee = (2000e6 * platformFee) / amountIn;
+        assertEq(usdc.balanceOf(relayerAddr), expectedPlatformFee,
+            "platform fee paid to platformFeeCollector in output token");
+
+        // Stage 2: positive-slippage fee at feeBps, after platform fee.
+        // gained_after_platform_fee = 2000e6 - 4e6 = 1996e6
+        // surplus                   = 1996e6 - 1800e6 = 196e6
+        // slippage_fee              = 196e6 * 5000 / 10000 = 98e6
+        uint256 gainedAfterPlatform = 2000e6 - expectedPlatformFee;
+        uint256 expectedSlippageFee =
+            ((gainedAfterPlatform - minAmountOut) * app.feeBps()) / 10000;
+        assertEq(usdc.balanceOf(feeCollector), expectedSlippageFee,
+            "positive-slippage fee paid to feeCollector");
+
+        // Stage 3: user receives whatever's left.
+        assertEq(usdc.balanceOf(userAddr),
+            gainedAfterPlatform - expectedSlippageFee,
+            "user gets gained - platformFee - slippageFee");
+
+        // No WETH ever left the user beyond amountIn (no separate fee pull).
+        assertEq(weth.balanceOf(userAddr), 0, "all WETH went to the swap");
+    }
+
+    function test_platformFee_exceedsCap_reverts() public {
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        uint256 platformFee = 1 ether; // exceeds 0.1 ether cap
+
+        weth.mint(userAddr, amountIn + platformFee);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn + platformFee);
+
+        bytes32 orderId = keccak256("fee_too_high");
+        bytes memory intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            platformFee,
+            false
+        );
+
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](1);
+        calls[0] = IAppIntentBase.Call({ target: address(0), value: 0, callData: "" });
+
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls, deadline: order.deadline, nonce: 0, metadata: ""
+        });
+
+        vm.prank(relayerAddr);
+        vm.expectRevert("Fee exceeds cap");
+        app.scoreIntent(order, plan);
+    }
+
+    function test_platformFee_zeroFee_noop() public {
+        // Verify zero fee doesn't attempt any transfer
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("zero_fee_swap");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        uint256 collectorBefore = weth.balanceOf(relayerAddr);
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid);
+        assertEq(weth.balanceOf(relayerAddr), collectorBefore, "No platform fee collected");
+    }
+
+    function test_platformFee_skippedIfWouldBreakMinimum() public {
+        // If the realised output equals minAmountOut exactly, deducting the
+        // fee would push the user below their guaranteed minimum. The
+        // contract MUST skip the fee in that case rather than fail the swap
+        // — keeping the user whole beats collecting a tiny platform fee.
+        dex.setRate(1800); // gained == minAmountOut exactly, no headroom for fee
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        uint256 platformFee = 0.002 ether;
+
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("fee_skipped_min");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+        // Inject the platform fee into the order's intent params.
+        order.intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            platformFee,
+            false
+        );
+
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid, "swap must succeed even when fee would break the minimum");
+        assertEq(usdc.balanceOf(relayerAddr), 0, "fee skipped, not deducted");
+        assertEq(usdc.balanceOf(userAddr), 1800e6, "user receives full minAmountOut");
+    }
+
+    function test_platformFee_adminSetCollector() public {
+        address newCollector = makeAddr("treasury");
+        vm.prank(relayerAddr);
+        app.setPlatformFeeCollector(newCollector);
+        assertEq(app.platformFeeCollector(), newCollector);
+    }
+
+    function test_platformFee_adminSetMaxFee() public {
+        vm.prank(relayerAddr);
+        app.setMaxPlatformFeeWei(0.5 ether);
+        assertEq(app.maxPlatformFeeWei(), 0.5 ether);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     BASIC SWAP VIA SCOREINTENT
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_basicSwap_scoreIntent() public {
+        // Setup: user has WETH, approves app
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        // Build order + plan
+        bytes32 orderId = keccak256("basic_swap");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        // Call scoreIntent (simulation mode — relayer only, no user signatures needed)
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid, "Should be valid");
+        assertEq(score, 5000, "Score should be 5000 at exactly minAmountOut");
+
+        // Verify tokens delivered
+        assertEq(usdc.balanceOf(userAddr), minAmountOut, "User should receive minAmountOut");
+        assertEq(usdc.balanceOf(feeCollector), 0, "No fee at exact min output");
+    }
+
+    function test_swap_positiveSlippage() public {
+        // Set DEX rate to give 20% more than minimum
+        dex.setRate(2160); // 1 WETH = 2160 USDC (20% above 1800)
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("slippage_swap");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid);
+        assertGt(score, 5000, "Score should be above 5000 with surplus");
+
+        // Surplus: 2160 - 1800 = 360 USDC
+        // Fee: 50% of 360 = 180 USDC
+        // User gets: 2160 - 180 = 1980 USDC
+        assertEq(usdc.balanceOf(userAddr), 1980e6, "User gets output minus fee");
+        assertEq(usdc.balanceOf(feeCollector), 180e6, "Fee collector gets 50% of surplus");
+    }
+
+    function test_swap_noFeeWhenZeroFeeBps() public {
+        // Deploy app with 0% fee
+        DexAggregatorApp noFeeApp = new DexAggregatorApp(
+            relayerAddr, address(registry), 8000, 5000, address(weth), relayerAddr, 0.1 ether, feeCollector, 0
+        );
+
+        dex.setRate(2160); // 20% surplus
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(noFeeApp), amountIn);
+
+        bytes32 orderId = keccak256("no_fee_swap");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlanForApp(orderId, amountIn, minAmountOut, userAddr, noFeeApp);
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = noFeeApp.scoreIntent(order, plan);
+
+        assertTrue(valid);
+        // User gets entire output (2160 USDC), no fee
+        assertEq(usdc.balanceOf(userAddr), 2160e6, "User gets full output");
+        assertEq(usdc.balanceOf(feeCollector), 0, "No fee");
+    }
+
+    function test_swap_belowMinimum_reverts() public {
+        // Set DEX rate to give less than minimum
+        dex.setRate(1700); // 1 WETH = 1700 USDC (below 1800 min)
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("bad_swap");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertFalse(valid, "Should fail: output below minimum");
+        assertEq(score, 0);
+    }
+
+    function test_swap_sameToken_reverts() public {
+        uint256 amountIn = 1e18;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("same_token");
+        bytes memory intentParams = abi.encode(
+            address(weth), address(weth), amountIn, uint256(1e18), userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            uint256(0), // platformFeeWei
+            false       // unwrapOutput
+        );
+
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](0);
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        vm.prank(relayerAddr);
+        vm.expectRevert("Same token");
+        app.scoreIntent(order, plan);
+    }
+
+    function test_swap_differentReceiver() public {
+        address receiver = makeAddr("receiver");
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("diff_receiver");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, receiver);
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid);
+        assertEq(usdc.balanceOf(receiver), minAmountOut, "Receiver gets tokens");
+        assertEq(usdc.balanceOf(userAddr), 0, "User doesn't get tokens");
+    }
+
+    function test_swap_returnsRemainingInput() public {
+        // DEX only consumes 0.5 WETH, returns 900 USDC
+        // User sent 1 WETH, so 0.5 WETH should be returned
+        // We'll use a partial swap by having the DEX consume less
+
+        // Deploy a partial-consuming DEX
+        PartialDex partialDex = new PartialDex();
+        usdc.mint(address(partialDex), 10_000_000e6);
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 900e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("partial_swap");
+        bytes memory intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            uint256(0), // platformFeeWei
+            false       // unwrapOutput
+        );
+
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        // Plan: approve partialDex, swap only 0.5 WETH, and transfer remaining 0.5 WETH back to user
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](3);
+        calls[0] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(partialDex), type(uint256).max))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(partialDex),
+            value: 0,
+            callData: abi.encodeCall(partialDex.swapPartial, (
+                address(weth), address(usdc), 0.5e18, 900e6, address(app)
+            ))
+        });
+        calls[2] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.transfer, (userAddr, 0.5e18))
+        });
+
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid);
+        assertEq(usdc.balanceOf(userAddr), 900e6, "User gets USDC");
+        assertEq(weth.balanceOf(userAddr), 0.5e18, "User gets remaining WETH back");
+    }
+
+    function test_swap_maxScore() public {
+        // Give user 3600+ USDC (>= 2x minAmountOut) → max score
+        dex.setRate(3600); // 2x rate
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("max_score");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid);
+        assertEq(score, 10000, "Max score at 2x min output");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     FULL EXECUTEINTENT FLOW
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_fullExecuteIntent() public {
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+
+        // Setup
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        // Build order
+        bytes32 orderId = keccak256("full_e2e");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        // Sign user order
+        bytes memory userSig = _signOrder(order, userKey);
+
+        // Sign validator approvals
+        bytes32 planHash = EIP712Verifier.hashPlanMem(plan);
+        uint256 scoreThreshold = app.scoreThreshold();
+        bytes[] memory validatorSigs = new bytes[](3);
+        for (uint256 i = 0; i < 3; i++) {
+            validatorSigs[i] = _signPlanApproval(orderId, planHash, scoreThreshold, validatorKeys[i]);
+        }
+
+        // Execute
+        vm.prank(relayerAddr);
+        app.executeIntent(order, plan, userSig, validatorSigs);
+
+        // Verify
+        assertEq(usdc.balanceOf(userAddr), minAmountOut, "User gets USDC");
+        assertEq(weth.balanceOf(userAddr), 0, "WETH consumed");
+        assertEq(app.nonces(userAddr), 1, "Nonce incremented");
+        assertTrue(app.executedOrders(orderId), "Order marked executed");
+    }
+
+    function test_fullExecuteIntent_withSlippage() public {
+        dex.setRate(2000); // ~11% surplus
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("e2e_slippage");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        bytes memory userSig = _signOrder(order, userKey);
+        bytes32 planHash = EIP712Verifier.hashPlanMem(plan);
+        uint256 scoreThreshold = app.scoreThreshold();
+        bytes[] memory validatorSigs = new bytes[](3);
+        for (uint256 i = 0; i < 3; i++) {
+            validatorSigs[i] = _signPlanApproval(orderId, planHash, scoreThreshold, validatorKeys[i]);
+        }
+
+        vm.prank(relayerAddr);
+        app.executeIntent(order, plan, userSig, validatorSigs);
+
+        // Output: 2000 USDC. Surplus: 200 USDC. Fee: 100 USDC. User: 1900 USDC.
+        assertEq(usdc.balanceOf(userAddr), 1900e6, "User gets output minus fee");
+        assertEq(usdc.balanceOf(feeCollector), 100e6, "Fee collector gets fee");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     EVENTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_swapExecutedEvent() public {
+        dex.setRate(2000);
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("event_test");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        vm.prank(relayerAddr);
+        vm.expectEmit(true, true, false, true);
+        emit DexAggregatorApp.SwapExecuted(
+            orderId, userAddr, address(weth), address(usdc), amountIn, 2000e6, 100e6
+        );
+        app.scoreIntent(order, plan);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     ERC-2612 PERMIT TESTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_swap_withPermit() public {
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+
+        // No pre-approval — rely solely on permit
+
+        // Build ERC-2612 permit signature
+        uint256 permitDeadline = block.timestamp + 3600;
+        bytes32 permitTypehash = keccak256(
+            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+        );
+        bytes32 domainSep = weth.DOMAIN_SEPARATOR();
+        bytes32 structHash = keccak256(abi.encode(
+            permitTypehash,
+            userAddr,
+            address(app),
+            amountIn,
+            weth.nonces(userAddr),
+            permitDeadline
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSep, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userKey, digest);
+
+        // Encode intent params with permit fields
+        bytes memory intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            permitDeadline, v, r, s,
+            uint256(0), // platformFeeWei
+            false       // unwrapOutput
+        );
+
+        bytes32 orderId = keccak256("permit_swap");
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](2);
+        calls[0] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(dex), type(uint256).max))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(dex),
+            value: 0,
+            callData: abi.encodeCall(dex.swap, (
+                address(weth), address(usdc), amountIn, 0, address(app)
+            ))
+        });
+
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid, "Permit swap should succeed");
+        assertEq(score, 5000, "Score should be 5000 at exactly minAmountOut");
+        assertEq(usdc.balanceOf(userAddr), minAmountOut, "User should receive tokens");
+        assertEq(weth.balanceOf(userAddr), 0, "WETH consumed");
+    }
+
+    function test_swap_permitFails_fallsBackToApproval() public {
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+
+        // Pre-approve (the fallback)
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        // Encode with a bad permit (wrong v/r/s but non-zero deadline triggers attempt)
+        bytes memory intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            uint256(block.timestamp + 3600), uint8(27), bytes32(uint256(1)), bytes32(uint256(2)),
+            uint256(0), // platformFeeWei
+            false       // unwrapOutput
+        );
+
+        bytes32 orderId = keccak256("bad_permit_swap");
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](2);
+        calls[0] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(dex), type(uint256).max))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(dex),
+            value: 0,
+            callData: abi.encodeCall(dex.swap, (
+                address(weth), address(usdc), amountIn, 0, address(app)
+            ))
+        });
+
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        // Bad permit is silently caught, falls back to approve()
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid, "Should succeed via approval fallback");
+        assertEq(score, 5000);
+        assertEq(usdc.balanceOf(userAddr), minAmountOut, "User should receive tokens");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                     SECURITY TESTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_scoreIntent_revert_nonRelayer() public {
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("nonrelayer_score");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        // Calling without relayer should revert
+        vm.expectRevert("Only relayer");
+        app.scoreIntent(order, plan);
+
+        // Random address should also revert
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert("Only relayer");
+        app.scoreIntent(order, plan);
+    }
+
+    function test_perpetualOrder_multiExecution() public {
+        dex.setRate(1800);
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+
+        // Mint enough for 2 executions
+        weth.mint(userAddr, amountIn * 2);
+        vm.prank(userAddr);
+        weth.approve(address(app), type(uint256).max);
+
+        bytes32 orderId = keccak256("perpetual_dex");
+        bytes memory intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            uint256(0), // platformFeeWei
+            false       // unwrapOutput
+        );
+
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: true,
+            maxExecutions: 3,
+            cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](2);
+        calls[0] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(dex), type(uint256).max))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(dex),
+            value: 0,
+            callData: abi.encodeCall(dex.swap, (
+                address(weth), address(usdc), amountIn, 0, address(app)
+            ))
+        });
+
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        // First execution
+        bytes memory userSig = _signOrder(order, userKey);
+        bytes32 planHash = EIP712Verifier.hashPlanMem(plan);
+        uint256 scoreThreshold = app.scoreThreshold();
+        bytes[] memory validatorSigs = new bytes[](3);
+        for (uint256 i = 0; i < 3; i++) {
+            validatorSigs[i] = _signPlanApproval(orderId, planHash, scoreThreshold, validatorKeys[i]);
+        }
+
+        vm.prank(relayerAddr);
+        app.executeIntent(order, plan, userSig, validatorSigs);
+        assertEq(app.executionCounts(orderId), 1);
+
+        // Second execution — should succeed with new salt (no CREATE2 collision)
+        order.nonce = 1;
+        userSig = _signOrder(order, userKey);
+
+        vm.prank(relayerAddr);
+        app.executeIntent(order, plan, userSig, validatorSigs);
+        assertEq(app.executionCounts(orderId), 2, "Second perpetual execution should succeed");
+        assertEq(usdc.balanceOf(userAddr), minAmountOut * 2, "User gets tokens from both executions");
+    }
+
+    function test_executeIntent_revert_wrongChain() public {
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("wrong_chain");
+        bytes memory intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            uint256(0), // platformFeeWei
+            false       // unwrapOutput
+        );
+
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: 999, // Wrong chain
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](0);
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        bytes memory userSig = _signOrder(order, userKey);
+        bytes[] memory validatorSigs = new bytes[](0);
+
+        vm.prank(relayerAddr);
+        vm.expectRevert("Wrong chain");
+        app.executeIntent(order, plan, userSig, validatorSigs);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                    MULTI-LEG / BRIDGE TESTS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_bridge_scoreIntent() public {
+        // Setup: user has WETH, approves app. Bridge = a mock contract that receives tokens.
+        uint256 amountIn = 1e18;
+        uint256 minBridged = 1e18;  // expect all tokens to reach bridge
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        // The "bridge contract" is just an address that receives tokens
+        address bridgeContract = makeAddr("bridge");
+
+        bytes memory intentParams = abi.encode(
+            address(weth), amountIn, minBridged, userAddr,
+            uint256(0), // platformFeeWei
+            false       // unwrapOutput
+        );
+
+        bytes32 orderId = keccak256("bridge_test");
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.BRIDGE_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: type(uint256).max,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        // Plan: approve bridge, then transfer all tokens to bridge
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](2);
+        calls[0] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (bridgeContract, amountIn))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.transfer, (bridgeContract, amountIn))
+        });
+
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        // Call scoreIntent — should succeed
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid, "Bridge should be valid");
+        assertGe(score, 5000, "Score should be >= 5000");
+        assertEq(weth.balanceOf(bridgeContract), amountIn, "Bridge should have received all tokens");
+    }
+
+    function test_bridge_belowMinimum_reverts() public {
+        // Only half the tokens reach the bridge — should fail invariant
+        uint256 amountIn = 1e18;
+        uint256 minBridged = 1e18;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        address bridgeContract = makeAddr("bridge2");
+
+        bytes memory intentParams = abi.encode(
+            address(weth), amountIn, minBridged, userAddr,
+            uint256(0), // platformFeeWei
+            false       // unwrapOutput
+        );
+
+        bytes32 orderId = keccak256("bridge_fail");
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(app),
+            intentSelector: app.BRIDGE_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: type(uint256).max,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        // Plan only transfers HALF to bridge
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](1);
+        calls[0] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.transfer, (bridgeContract, amountIn / 2))
+        });
+
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+        assertFalse(valid, "Should fail - only half bridged");
+        assertEq(score, 0, "Score should be 0");
+    }
+
+    function test_executeLeg_basic() public {
+        // Test executeLeg (renamed from executeCrossChainLeg)
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+
+        bytes32 orderId = keccak256("leg_test");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        // Sign
+        bytes memory userSig = _signOrder(order, userKey);
+        bytes32 planHash = EIP712Verifier.hashPlanMem(plan);
+        uint256 st = app.scoreThreshold();
+        bytes[] memory validatorSigs = new bytes[](3);
+        for (uint256 i = 0; i < 3; i++) {
+            validatorSigs[i] = _signPlanApproval(orderId, planHash, st, validatorKeys[i]);
+        }
+
+        // Execute via executeLeg
+        vm.prank(relayerAddr);
+        app.executeLeg(order, plan, 0, userSig, validatorSigs);
+
+        // Verify leg marked as executed
+        assertTrue(app.legExecuted(orderId, 0), "Leg 0 should be marked executed");
+
+        // Verify tokens delivered
+        assertEq(usdc.balanceOf(userAddr), minAmountOut, "User should receive output");
+    }
+
+    function test_executeLeg_replay_reverts() public {
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        weth.mint(userAddr, 2 * amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), 2 * amountIn);
+
+        bytes32 orderId = keccak256("leg_replay");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+
+        bytes memory userSig = _signOrder(order, userKey);
+        bytes32 planHash = EIP712Verifier.hashPlanMem(plan);
+        uint256 st = app.scoreThreshold();
+        bytes[] memory validatorSigs = new bytes[](3);
+        for (uint256 i = 0; i < 3; i++) {
+            validatorSigs[i] = _signPlanApproval(orderId, planHash, st, validatorKeys[i]);
+        }
+
+        // First execution succeeds
+        vm.prank(relayerAddr);
+        app.executeLeg(order, plan, 0, userSig, validatorSigs);
+
+        // Second execution reverts — replay protection
+        vm.expectRevert("Leg already executed");
+        vm.prank(relayerAddr);
+        app.executeLeg(order, plan, 0, userSig, validatorSigs);
+    }
+
+    function test_executeLeg_differentOrderIds() public {
+        // Multi-leg: each leg uses a different orderId to avoid proxy salt collision.
+        // In production, the platform generates unique orderId per leg.
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+
+        // Leg 0
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+        bytes32 orderId0 = keccak256("multi_leg_0");
+        (IAppIntentBase.IntentOrder memory order0, IAppIntentBase.ExecutionPlan memory plan0) =
+            _buildSwapOrderAndPlan(orderId0, amountIn, minAmountOut, userAddr);
+        bytes memory userSig0 = _signOrder(order0, userKey);
+        bytes32 planHash0 = EIP712Verifier.hashPlanMem(plan0);
+        uint256 st = app.scoreThreshold();
+        bytes[] memory valSigs0 = new bytes[](3);
+        for (uint256 i = 0; i < 3; i++) valSigs0[i] = _signPlanApproval(orderId0, planHash0, st, validatorKeys[i]);
+        vm.prank(relayerAddr);
+        app.executeLeg(order0, plan0, 0, userSig0, valSigs0);
+        assertTrue(app.legExecuted(orderId0, 0));
+
+        // Leg 1 — different orderId, different proxy
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+        bytes32 orderId1 = keccak256("multi_leg_1");
+        (IAppIntentBase.IntentOrder memory order1, IAppIntentBase.ExecutionPlan memory plan1) =
+            _buildSwapOrderAndPlan(orderId1, amountIn, minAmountOut, userAddr);
+        bytes memory userSig1 = _signOrder(order1, userKey);
+        bytes32 planHash1 = EIP712Verifier.hashPlanMem(plan1);
+        bytes[] memory valSigs1 = new bytes[](3);
+        for (uint256 i = 0; i < 3; i++) valSigs1[i] = _signPlanApproval(orderId1, planHash1, st, validatorKeys[i]);
+        vm.prank(relayerAddr);
+        app.executeLeg(order1, plan1, 1, userSig1, valSigs1);
+        assertTrue(app.legExecuted(orderId1, 1));
+
+        assertEq(usdc.balanceOf(userAddr), 2 * minAmountOut, "Both legs delivered tokens");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //                         HELPERS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function _buildSwapOrderAndPlan(
+        bytes32 orderId,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        address receiver
+    ) internal view returns (
+        IAppIntentBase.IntentOrder memory order,
+        IAppIntentBase.ExecutionPlan memory plan
+    ) {
+        return _buildSwapOrderAndPlanForApp(orderId, amountIn, minAmountOut, receiver, app);
+    }
+
+    function _buildSwapOrderAndPlanForApp(
+        bytes32 orderId,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        address receiver,
+        DexAggregatorApp targetApp
+    ) internal view returns (
+        IAppIntentBase.IntentOrder memory order,
+        IAppIntentBase.ExecutionPlan memory plan
+    ) {
+        bytes memory intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, receiver,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            uint256(0), // platformFeeWei (fee trailer)
+            false       // unwrapOutput
+        );
+
+        order = IAppIntentBase.IntentOrder({
+            orderId: orderId,
+            app: address(targetApp),
+            intentSelector: targetApp.SWAP_SELECTOR(),
+            intentParams: intentParams,
+            submittedBy: userAddr,
+            chainId: block.chainid,
+            deadline: block.timestamp + 3600,
+            nonce: 0,
+            perpetual: false,
+            maxExecutions: 1,
+            cooldown: 0
+        });
+
+        // Plan: approve dex, then call dex.swap(weth, usdc, amountIn, 0, targetApp)
+        // Output goes to app for fee capture, then _checkIntent delivers to receiver
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](2);
+        calls[0] = IAppIntentBase.Call({
+            target: address(weth),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(dex), type(uint256).max))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(dex),
+            value: 0,
+            callData: abi.encodeCall(dex.swap, (
+                address(weth), address(usdc), amountIn, 0, address(targetApp)
+            ))
+        });
+
+        plan = IAppIntentBase.ExecutionPlan({
+            calls: calls,
+            deadline: order.deadline,
+            nonce: 0,
+            metadata: ""
+        });
+    }
+
+    function _signOrder(
+        IAppIntentBase.IntentOrder memory order,
+        uint256 privateKey
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(
+            EIP712Verifier.INTENT_ORDER_TYPEHASH,
+            order.orderId,
+            order.app,
+            order.intentSelector,
+            keccak256(order.intentParams),
+            order.submittedBy,
+            order.chainId,
+            order.deadline,
+            order.nonce,
+            order.perpetual,
+            order.maxExecutions,
+            order.cooldown
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signPlanApproval(
+        bytes32 orderId,
+        bytes32 planHash,
+        uint256 score,
+        uint256 privateKey
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(
+            EIP712Verifier.PLAN_APPROVAL_TYPEHASH,
+            orderId,
+            planHash,
+            score
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _sortValidators() internal {
+        for (uint256 i = 0; i < validatorAddrs.length; i++) {
+            for (uint256 j = i + 1; j < validatorAddrs.length; j++) {
+                if (validatorAddrs[i] > validatorAddrs[j]) {
+                    (validatorAddrs[i], validatorAddrs[j]) = (validatorAddrs[j], validatorAddrs[i]);
+                    (validatorKeys[i], validatorKeys[j]) = (validatorKeys[j], validatorKeys[i]);
+                }
+            }
+        }
+    }
+}
+
+/// @title PartialDex - Consumes only a portion of input
+contract PartialDex {
+    function swapPartial(
+        address inputToken,
+        address outputToken,
+        uint256 inputAmount,
+        uint256 outputAmount,
+        address recipient
+    ) external {
+        IERC20(inputToken).transferFrom(msg.sender, address(this), inputAmount);
+        IERC20(outputToken).transfer(recipient, outputAmount);
+    }
+}
