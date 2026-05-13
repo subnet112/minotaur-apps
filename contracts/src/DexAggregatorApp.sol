@@ -12,18 +12,32 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 ///         validators verify via simulation, and the app handles token
 ///         management, positive slippage fee capture, and delivery.
 ///
-///         Intent params encoding (10 fields, last 5 optional/platform):
+///         Intent params encoding (11 fields for swap):
 ///           abi.encode(address tokenIn, address tokenOut,
 ///                      uint256 amountIn, uint256 minAmountOut, address receiver,
 ///                      uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS,
-///                      uint256 platformFeeWei)
-///         The platformFeeWei trailer is consumed by AppIntentBase before _swap runs.
+///                      uint256 platformFeeWei,
+///                      bool unwrapOutput)
+///         platformFeeWei is consumed by AppIntentBase via `_calculateProtocolFee`
+///         (overridden below to read field 10, since `unwrapOutput` follows).
 ///
 ///         Execution flow (via _handleIntent → _swap dispatch):
 ///           1. Decode params, handle optional ERC-2612 permit.
 ///           2. Deploy EphemeralProxy, fund it, execute solver's plan calls.
-///           3. Verify output >= minAmountOut, capture fee on positive slippage.
-///           4. Deliver output tokens to receiver.
+///           3. Verify output >= minAmountOut, deliver protocol fee in WETH
+///              (from output when tokenOut==WETH and surplus covers it; otherwise
+///              from the app's paymaster), capture positive-slippage fee in
+///              tokenOut, deliver remainder to receiver.
+///
+///         Fee model:
+///           - This app deploys in `FeeMode.APP` by default. The end user only
+///             approves `amountIn` of `tokenIn` — they NEVER hold or approve
+///             the wrapped native token. The app pays the protocol fee in WETH
+///             out of the swap surplus (when possible) or its own working
+///             capital (paymaster).
+///           - The paymaster (typically the same address as `feeCollector`)
+///             must pre-approve this contract to pull WETH. App operator is
+///             responsible for keeping a WETH float on the paymaster.
 contract DexAggregatorApp is AppIntentBase {
     using SafeERC20 for IERC20;
 
@@ -42,7 +56,7 @@ contract DexAggregatorApp is AppIntentBase {
     /// @notice Fee on positive slippage in BPS (e.g., 5000 = 50%)
     uint256 public feeBps;
 
-    /// @notice Address that receives positive slippage fees
+    /// @notice Address that receives positive slippage fees (in tokenOut)
     address public feeCollector;
 
     // ── Events ─────────────────────────────────────────────────────────────
@@ -62,6 +76,12 @@ contract DexAggregatorApp is AppIntentBase {
 
     // ── Constructor ────────────────────────────────────────────────────────
 
+    /// @notice Deploy the DEX aggregator app.
+    /// @dev `appPaymaster` defaults to `_feeCollector` when passed as address(0).
+    ///      The feeCollector both (a) receives positive-slippage fees in tokenOut,
+    ///      and (b) acts as the WETH paymaster for protocol fees in APP mode.
+    ///      App operators wishing to separate these roles can pass a distinct
+    ///      `_appPaymaster` address.
     constructor(
         address _relayer,
         address _validatorRegistry,
@@ -69,10 +89,24 @@ contract DexAggregatorApp is AppIntentBase {
         uint256 _scoreThreshold,
         address _wrappedNativeToken,
         address _platformFeeCollector,
+        uint256 _minPlatformFeeWei,
         uint256 _maxPlatformFeeWei,
+        AppIntentBase.FeeMode _feeMode,
+        address _appPaymaster,
         address _feeCollector,
         uint256 _feeBps
-    ) AppIntentBase(_relayer, _validatorRegistry, _quorumBps, _scoreThreshold, _wrappedNativeToken, _platformFeeCollector, _maxPlatformFeeWei) {
+    ) AppIntentBase(
+        _relayer,
+        _validatorRegistry,
+        _quorumBps,
+        _scoreThreshold,
+        _wrappedNativeToken,
+        _platformFeeCollector,
+        _minPlatformFeeWei,
+        _maxPlatformFeeWei,
+        _feeMode,
+        _appPaymaster == address(0) ? _feeCollector : _appPaymaster
+    ) {
         require(_feeCollector != address(0), "Invalid fee collector");
         require(_feeBps <= 10000, "Fee too high");
         feeCollector = _feeCollector;
@@ -95,6 +129,26 @@ contract DexAggregatorApp is AppIntentBase {
         emit FeeBpsUpdated(_feeBps);
     }
 
+    // ── Fee calculation override ──────────────────────────────────────────
+
+    /// @notice Read platformFeeWei from intentParams.
+    /// @dev SWAP intent params has 11 fields; the fee is at index 9 with
+    ///      `unwrapOutput` (bool) as the trailing field. The base contract's
+    ///      default decoder reads the LAST 32 bytes and would return the bool
+    ///      cast to uint, so we override to read the penultimate slot.
+    ///      BRIDGE intent params has 5 fields with platformFeeWei trailing,
+    ///      so we delegate to the base helper for that case.
+    function _calculateProtocolFee(
+        IntentOrder calldata order
+    ) internal view override returns (uint256) {
+        if (order.intentSelector == SWAP_SELECTOR) {
+            bytes calldata p = order.intentParams;
+            if (p.length < 64) return 0;
+            return abi.decode(p[p.length - 64:p.length - 32], (uint256));
+        }
+        return _decodePlatformFee(order.intentParams);
+    }
+
     // ── Intent dispatch ────────────────────────────────────────────────────
 
     /// @notice Dispatch to real intent functions based on intentSelector
@@ -113,19 +167,8 @@ contract DexAggregatorApp is AppIntentBase {
 
     // ── Intent functions ────────────────────────────────────────────────────
 
-    /// @notice Override: do NOT pull WETH fee up-front. _swap/_bridge handle
-    ///         fee collection themselves, deducting from the swap output when
-    ///         possible so users swapping ERC-20 → WETH don't need to hold
-    ///         or approve WETH before the trade.
-    function _collectPlatformFee(
-        bytes32 /*orderId*/,
-        address /*user*/,
-        bytes calldata /*intentParams*/
-    ) internal pure override {
-        // Intentionally no-op — see DexAggregatorApp._swap / _bridge.
-    }
-
-    /// @notice Token swap: collect input, execute plan, verify output, score.
+    /// @notice Token swap: collect input, execute plan, settle protocol fee,
+    ///         capture positive slippage, deliver output to receiver.
     function _swap(
         IntentOrder calldata order,
         ExecutionPlan calldata plan
@@ -139,25 +182,7 @@ contract DexAggregatorApp is AppIntentBase {
 
         require(tokenIn != tokenOut, "Same token");
 
-        // When user sends msg.value (native ETH path), fee is skipped —
-        // same logic as the base class's _collectPlatformFee which returns
-        // early on msg.value > 0. The user is paying gas directly so there's
-        // no relayer to reimburse.
-        // Note: we read platformFeeRaw from the decoded tuple (field 10)
-        // rather than _decodePlatformFee() because the 11th field (bool)
-        // shifted the "last 32 bytes" position.
-        uint256 platformFee = (msg.value > 0) ? 0 : platformFeeRaw;
-        if (platformFee > 0) {
-            require(platformFee <= maxPlatformFeeWei, "Fee exceeds cap");
-            require(platformFeeCollector != address(0), "No fee collector");
-        }
-
         // 1. Collect user tokens and execute plan.
-        // The user approves exactly `amountIn` of `tokenIn` ONCE — no
-        // separate fee approval. `platformFee` is denominated in WETH wei
-        // but is collected from the swap OUTPUT, converted at the swap's
-        // actual rate. This makes the approval UX consistent regardless of
-        // whether the input or output happens to be WETH.
         _snapshot(tokenOut);
         _tryPermit(tokenIn, order.submittedBy, amountIn, permitDeadline, permitV, permitR, permitS);
         _fundAndExecute(order, plan, tokenIn, order.submittedBy, amountIn);
@@ -166,47 +191,42 @@ contract DexAggregatorApp is AppIntentBase {
         uint256 gained = _gained(tokenOut);
         if (gained < minAmountOut) return (0, false);
 
-        // 3. Platform fee — always taken from output, never from input.
+        // 3. Deliver protocol fee in WETH (APP mode only — USER mode was
+        //    settled by AppIntentBase before _handleIntent ran, and on the
+        //    native-input path the base already returned early).
         //
-        // Three cases the swap can be in:
-        //   a) tokenOut == WETH    → fee_in_output = platformFee directly
-        //                            (1:1 — both denominated in WETH).
-        //   b) tokenIn  == WETH    → fee_in_output = platformFee × gained / amountIn
-        //                            (the actual WETH→tokenOut rate from THIS swap).
-        //   c) neither              → we don't have a reliable WETH price reference
-        //                            without an oracle. Fee is skipped; relayer
-        //                            absorbs gas. Solver should set platformFee=0
-        //                            in this case.
+        //    Strategy:
+        //      a) tokenOut == WETH and surplus ≥ fee → take from output
+        //         (no DEX hop, no paymaster touch).
+        //      b) otherwise → pull WETH from appPaymaster.
         //
-        // ALL three avoid pulling extra tokens from the user — the swap input
-        // (`amountIn`) is the only allowance the user needs.
-        if (platformFee > 0) {
-            address weth = address(wrappedNativeToken);
-            uint256 feeInOutput = 0;
-            if (tokenOut == weth) {
-                feeInOutput = platformFee;
-            } else if (tokenIn == weth && amountIn > 0) {
-                feeInOutput = (gained * platformFee) / amountIn;
+        //    Either path delivers to platformFeeCollector in WETH wei. The
+        //    base verifies the collector balance grew by ≥ feeOwed after
+        //    _handleIntent returns. Silent skip is intentionally NOT
+        //    supported — the protocol fee is mandatory.
+        if (feeMode == AppIntentBase.FeeMode.APP && platformFeeRaw > 0 && msg.value == 0) {
+            uint256 platformFee = _clampFee(platformFeeRaw);
+            if (platformFee > 0) {
+                address weth = address(wrappedNativeToken);
+                if (tokenOut == weth && gained >= minAmountOut + platformFee) {
+                    IERC20(weth).safeTransfer(platformFeeCollector, platformFee);
+                    gained -= platformFee;
+                } else {
+                    require(appPaymaster != address(0), "App paymaster not set");
+                    IERC20(weth).safeTransferFrom(appPaymaster, platformFeeCollector, platformFee);
+                }
             }
-            // Must not eat into the user's guaranteed minimum.
-            if (feeInOutput > 0 && gained >= minAmountOut + feeInOutput) {
-                IERC20(tokenOut).safeTransfer(platformFeeCollector, feeInOutput);
-                gained -= feeInOutput;
-                emit PlatformFeeCollected(order.orderId, order.submittedBy, feeInOutput);
-            }
-            // If feeInOutput would push gained below minAmountOut, we silently
-            // skip the fee rather than fail the swap — keeping the user whole
-            // is more important than collecting a tiny platform fee.
         }
 
-        // 3. Fee on positive slippage + deliver
+        // 4. Positive-slippage capture (app revenue, in tokenOut).
         uint256 fee = ((gained - minAmountOut) * feeBps) / 10000;
         uint256 userAmount = gained - fee;
 
         // Auto-unwrap: if user selected native ETH/TAO as output (not WETH),
-        // the frontend sets unwrapOutput=true. We unwrap the WETH → native
-        // and send ETH directly so the user doesn't have to deal with WETH.
-        // Fee stays as WETH to the feeCollector (they can unwrap themselves).
+        // the frontend sets unwrapOutput=true. We unwrap WETH → native ETH
+        // and send it directly so the user doesn't have to deal with WETH.
+        // The slippage fee stays in WETH at the app's feeCollector — they
+        // can unwrap themselves if desired.
         if (unwrapOutput && tokenOut == address(wrappedNativeToken) && userAmount > 0) {
             IWETH(address(wrappedNativeToken)).withdraw(userAmount);
             (bool sent,) = payable(receiver).call{value: userAmount}("");
@@ -216,7 +236,7 @@ contract DexAggregatorApp is AppIntentBase {
         }
         if (fee > 0) IERC20(tokenOut).safeTransfer(feeCollector, fee);
 
-        // 4. Score: 5000 at minAmountOut, linear to 10000 at 2x
+        // 5. Score: 5000 at minAmountOut, linear to 10000 at 2x
         score = _scoreLinear(gained, minAmountOut);
         valid = true;
 
@@ -237,6 +257,12 @@ contract DexAggregatorApp is AppIntentBase {
     /// @dev Used as the source leg of cross-chain intents. The plan typically
     ///      contains: approve(bridgeContract, amount) + bridgeContract.transferRemote(...).
     ///      Invariant: proxy balance of tokenIn after plan = 0 (all sent to bridge).
+    ///
+    ///      Protocol fee is settled by AppIntentBase (USER mode pulls from user
+    ///      pre-handle; APP mode requires the app/paymaster to top up the
+    ///      collector by `feeOwed` before this function returns — typically by
+    ///      the relayer's plan including an explicit transferFrom to the
+    ///      collector, or by the bridge router topping up via paymaster).
     function _bridge(
         IntentOrder calldata order,
         ExecutionPlan calldata plan
@@ -246,7 +272,7 @@ contract DexAggregatorApp is AppIntentBase {
             uint256 amountIn,
             uint256 minBridged,
             address receiver,
-            /* uint256 platformFeeWei — consumed by AppIntentBase._collectPlatformFee() */
+            /* uint256 platformFeeWei — consumed by AppIntentBase._calculateProtocolFee() */
         ) = abi.decode(order.intentParams, (address, uint256, uint256, address, uint256));
 
         // 1. Pull user tokens and execute plan (approve + bridge deposit)
@@ -259,8 +285,18 @@ contract DexAggregatorApp is AppIntentBase {
         uint256 bridged = amountIn - remaining;
         if (bridged < minBridged) return (0, false);
 
-        // 3. Dust stays in proxy (no selfdestruct — negligible amounts only)
-        //    Well-formed plans should leave remaining == 0.
+        // 3. App-mode protocol fee fallback: bridge legs don't have a
+        //    "swap surplus" to draw on. Pull from paymaster directly.
+        uint256 platformFeeRaw = _calculateProtocolFee(order);
+        if (feeMode == AppIntentBase.FeeMode.APP && platformFeeRaw > 0 && msg.value == 0) {
+            uint256 platformFee = _clampFee(platformFeeRaw);
+            if (platformFee > 0) {
+                require(appPaymaster != address(0), "App paymaster not set");
+                IERC20(address(wrappedNativeToken)).safeTransferFrom(
+                    appPaymaster, platformFeeCollector, platformFee
+                );
+            }
+        }
 
         // 4. Score: 5000 at minBridged, 10000 at full amount
         score = _scoreLinear(bridged, minBridged);

@@ -90,7 +90,11 @@ contract DexAggregatorTest is Test {
         dex = new MockDex();
         usdc.mint(address(dex), 100_000_000e6);
 
-        // Deploy registry + app
+        // Deploy registry + app.
+        // App-paid protocol fees by default: the user only ever needs to
+        // approve `amountIn` of `tokenIn`. The app sources the protocol fee
+        // in WETH from swap surplus when possible, otherwise from its
+        // paymaster (defaulted to feeCollector here).
         registry = new ValidatorRegistry(relayerAddr, validatorAddrs);
         app = new DexAggregatorApp(
             relayerAddr,
@@ -98,8 +102,11 @@ contract DexAggregatorTest is Test {
             8000,  // quorumBps
             5000,  // scoreThreshold
             address(weth),   // wrappedNativeToken (WETH for platform fees)
-            relayerAddr,     // platformFeeCollector
+            relayerAddr,     // platformFeeCollector (subnet treasury proxy)
+            0,               // minPlatformFeeWei (no floor in tests)
             0.1 ether,       // maxPlatformFeeWei
+            AppIntentBase.FeeMode.APP,   // app pays, user is WETH-unaware
+            address(0),                  // appPaymaster (defaults to feeCollector)
             feeCollector,
             5000   // feeBps: 50% of positive slippage
         );
@@ -119,12 +126,22 @@ contract DexAggregatorTest is Test {
 
     function test_constructor_revert_zeroFeeCollector() public {
         vm.expectRevert("Invalid fee collector");
-        new DexAggregatorApp(relayerAddr, address(registry), 8000, 5000, address(weth), relayerAddr, 0.1 ether, address(0), 5000);
+        new DexAggregatorApp(
+            relayerAddr, address(registry), 8000, 5000,
+            address(weth), relayerAddr, 0, 0.1 ether,
+            AppIntentBase.FeeMode.APP, address(0),
+            address(0), 5000
+        );
     }
 
     function test_constructor_revert_feeTooHigh() public {
         vm.expectRevert("Fee too high");
-        new DexAggregatorApp(relayerAddr, address(registry), 8000, 5000, address(weth), relayerAddr, 0.1 ether, feeCollector, 10001);
+        new DexAggregatorApp(
+            relayerAddr, address(registry), 8000, 5000,
+            address(weth), relayerAddr, 0, 0.1 ether,
+            AppIntentBase.FeeMode.APP, address(0),
+            feeCollector, 10001
+        );
     }
 
     function test_setFeeCollector() public {
@@ -157,19 +174,20 @@ contract DexAggregatorTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     function test_platformFee_collected() public {
-        // The platform fee is denominated in WETH wei but always taken from
-        // the swap OUTPUT (converted at the realised swap rate when the
-        // input is WETH, 1:1 when the output is WETH). The user only ever
-        // needs an allowance covering ``amountIn`` — never amountIn + fee
-        // — and there is no separate ``transferFrom`` for the fee.
+        // In APP mode (the default for DexAggregatorApp) the end user is
+        // unaware of Bittensor and only ever approves ``amountIn`` of
+        // ``tokenIn``. The protocol fee is paid in the wrapped native token
+        // (WETH here) and is sourced by the app from two places, in order:
         //
-        // Two fees apply on a profitable swap and are deducted in order:
-        //   1. Platform fee  → ``platformFeeCollector`` (relayerAddr in this
-        //      test setup), denominated in WETH wei but paid in the output
-        //      token at the realised rate.
-        //   2. Positive-slippage fee → ``feeCollector``, computed on
-        //      (gained_after_platform_fee - minAmountOut) at ``feeBps``.
-        //   3. Whatever's left is delivered to the user.
+        //   1. The swap output, when ``tokenOut == WETH`` AND the swap
+        //      surplus is at least ``platformFee`` above ``minAmountOut``.
+        //      No paymaster touch, no extra approval — atomic with the swap.
+        //   2. The app's paymaster, otherwise. The paymaster (set to
+        //      ``feeCollector`` in this fixture) must hold WETH and have
+        //      pre-approved the app to pull it. App operator's responsibility
+        //      to keep this account funded.
+        //
+        // This test exercises path (2) because tokenOut is USDC.
         dex.setRate(2000); // 1 WETH = 2000 USDC, surplus over minAmountOut
 
         uint256 amountIn = 1e18;
@@ -180,6 +198,13 @@ contract DexAggregatorTest is Test {
         weth.mint(userAddr, amountIn);
         vm.prank(userAddr);
         weth.approve(address(app), amountIn);
+
+        // Paymaster (feeCollector) is funded with WETH and approves the app.
+        // This is the app operator's working capital — what makes Bittensor
+        // invisible to the end user.
+        weth.mint(feeCollector, platformFee * 10);
+        vm.prank(feeCollector);
+        weth.approve(address(app), type(uint256).max);
 
         bytes32 orderId = keccak256("platform_fee_swap");
         bytes memory intentParams = abi.encode(
@@ -224,35 +249,40 @@ contract DexAggregatorTest is Test {
             metadata: ""
         });
 
+        uint256 paymasterWethBefore = weth.balanceOf(feeCollector);
+
         vm.prank(relayerAddr);
         (, bool valid) = app.scoreIntent(order, plan);
 
-        assertTrue(valid, "swap must succeed with allowance == amountIn (no fee headroom)");
+        assertTrue(valid, "swap must succeed with allowance == amountIn");
 
-        // Stage 1: platform fee in OUTPUT token (USDC), at the swap's rate.
-        // expected = (gained * platformFee) / amountIn
-        //          = (2000e6 * 0.002e18) / 1e18 = 4_000_000 (4 USDC)
-        uint256 expectedPlatformFee = (2000e6 * platformFee) / amountIn;
-        assertEq(usdc.balanceOf(relayerAddr), expectedPlatformFee,
-            "platform fee paid to platformFeeCollector in output token");
+        // Stage 1: protocol fee paid to platformFeeCollector in WETH (NOT USDC).
+        // The amount is exactly platformFee — no rate-conversion math at the
+        // contract layer, because the base verifies WETH-denominated delivery.
+        assertEq(weth.balanceOf(relayerAddr), platformFee,
+            "protocol fee paid to platformFeeCollector in wrapped native");
 
-        // Stage 2: positive-slippage fee at feeBps, after platform fee.
-        // gained_after_platform_fee = 2000e6 - 4e6 = 1996e6
-        // surplus                   = 1996e6 - 1800e6 = 196e6
-        // slippage_fee              = 196e6 * 5000 / 10000 = 98e6
-        uint256 gainedAfterPlatform = 2000e6 - expectedPlatformFee;
-        uint256 expectedSlippageFee =
-            ((gainedAfterPlatform - minAmountOut) * app.feeBps()) / 10000;
+        // Stage 2: the paymaster's WETH balance dropped by exactly platformFee.
+        // This is the visible cost to the app of running an order where the
+        // output token can't cover the fee — paid out of its working capital.
+        assertEq(weth.balanceOf(feeCollector), paymasterWethBefore - platformFee,
+            "paymaster WETH float decreased by the protocol fee");
+
+        // Stage 3: positive-slippage capture on the FULL output (no platform-
+        // fee deduction from gained any more — the protocol fee was paid in
+        // WETH, not in tokenOut).
+        // gained    = 2000e6
+        // surplus   = 200e6 (= 2000e6 - 1800e6)
+        // slip fee  = 100e6 (50% of surplus)
+        // user      = 1900e6
+        uint256 expectedSlippageFee = ((2000e6 - minAmountOut) * app.feeBps()) / 10000;
         assertEq(usdc.balanceOf(feeCollector), expectedSlippageFee,
-            "positive-slippage fee paid to feeCollector");
-
-        // Stage 3: user receives whatever's left.
-        assertEq(usdc.balanceOf(userAddr),
-            gainedAfterPlatform - expectedSlippageFee,
-            "user gets gained - platformFee - slippageFee");
+            "positive-slippage fee paid to feeCollector in tokenOut");
+        assertEq(usdc.balanceOf(userAddr), 2000e6 - expectedSlippageFee,
+            "user receives gained - slippage fee");
 
         // No WETH ever left the user beyond amountIn (no separate fee pull).
-        assertEq(weth.balanceOf(userAddr), 0, "all WETH went to the swap");
+        assertEq(weth.balanceOf(userAddr), 0, "all user WETH went to the swap");
     }
 
     function test_platformFee_exceedsCap_reverts() public {
@@ -320,12 +350,17 @@ contract DexAggregatorTest is Test {
         assertEq(weth.balanceOf(relayerAddr), collectorBefore, "No platform fee collected");
     }
 
-    function test_platformFee_skippedIfWouldBreakMinimum() public {
-        // If the realised output equals minAmountOut exactly, deducting the
-        // fee would push the user below their guaranteed minimum. The
-        // contract MUST skip the fee in that case rather than fail the swap
-        // — keeping the user whole beats collecting a tiny platform fee.
-        dex.setRate(1800); // gained == minAmountOut exactly, no headroom for fee
+    function test_platformFee_paidFromPaymaster_whenNoHeadroom() public {
+        // When the realised output equals minAmountOut exactly there is no
+        // swap surplus to draw the protocol fee from. Under the old design
+        // the contract silently dropped the fee — which let apps quietly
+        // bypass paying the subnet whenever a solver happened to barely hit
+        // the threshold.
+        //
+        // The new contract NEVER skips: it falls back to the app's paymaster
+        // for the WETH-denominated fee. User still receives full minAmountOut
+        // in tokenOut. App pays the protocol fee from its working capital.
+        dex.setRate(1800); // gained == minAmountOut exactly, no headroom
 
         uint256 amountIn = 1e18;
         uint256 minAmountOut = 1800e6;
@@ -335,10 +370,54 @@ contract DexAggregatorTest is Test {
         vm.prank(userAddr);
         weth.approve(address(app), amountIn);
 
-        bytes32 orderId = keccak256("fee_skipped_min");
+        // Paymaster funded + approved.
+        weth.mint(feeCollector, platformFee * 10);
+        vm.prank(feeCollector);
+        weth.approve(address(app), type(uint256).max);
+
+        bytes32 orderId = keccak256("fee_from_paymaster");
         (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
             _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
-        // Inject the platform fee into the order's intent params.
+        order.intentParams = abi.encode(
+            address(weth), address(usdc), amountIn, minAmountOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            platformFee,
+            false
+        );
+
+        uint256 paymasterBefore = weth.balanceOf(feeCollector);
+
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+
+        assertTrue(valid, "swap must succeed - paymaster covers the fee");
+        assertEq(weth.balanceOf(relayerAddr), platformFee,
+            "protocol fee delivered in WETH from paymaster");
+        assertEq(weth.balanceOf(feeCollector), paymasterBefore - platformFee,
+            "paymaster float decreased by exactly the protocol fee");
+        assertEq(usdc.balanceOf(userAddr), 1800e6, "user receives full minAmountOut");
+    }
+
+    function test_platformFee_revertsIfPaymasterUnfunded() public {
+        // When the paymaster has no WETH (or no allowance), an APP-mode swap
+        // that needs paymaster funding MUST revert — the protocol fee cannot
+        // be silently dropped. This is the property that closes the bypass
+        // attack: a dev cannot deploy with paymaster=feeCollector, never fund
+        // it, and run free orders. They'd just see their orders revert.
+        dex.setRate(2000);
+
+        uint256 amountIn = 1e18;
+        uint256 minAmountOut = 1800e6;
+        uint256 platformFee = 0.002 ether;
+
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+        // Paymaster intentionally NOT funded/approved.
+
+        bytes32 orderId = keccak256("fee_paymaster_dry");
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
         order.intentParams = abi.encode(
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
@@ -347,11 +426,8 @@ contract DexAggregatorTest is Test {
         );
 
         vm.prank(relayerAddr);
-        (, bool valid) = app.scoreIntent(order, plan);
-
-        assertTrue(valid, "swap must succeed even when fee would break the minimum");
-        assertEq(usdc.balanceOf(relayerAddr), 0, "fee skipped, not deducted");
-        assertEq(usdc.balanceOf(userAddr), 1800e6, "user receives full minAmountOut");
+        vm.expectRevert();
+        app.scoreIntent(order, plan);
     }
 
     function test_platformFee_adminSetCollector() public {
@@ -424,9 +500,12 @@ contract DexAggregatorTest is Test {
     }
 
     function test_swap_noFeeWhenZeroFeeBps() public {
-        // Deploy app with 0% fee
+        // Deploy app with 0% positive-slippage fee
         DexAggregatorApp noFeeApp = new DexAggregatorApp(
-            relayerAddr, address(registry), 8000, 5000, address(weth), relayerAddr, 0.1 ether, feeCollector, 0
+            relayerAddr, address(registry), 8000, 5000,
+            address(weth), relayerAddr, 0, 0.1 ether,
+            AppIntentBase.FeeMode.APP, address(0),
+            feeCollector, 0
         );
 
         dex.setRate(2160); // 20% surplus
