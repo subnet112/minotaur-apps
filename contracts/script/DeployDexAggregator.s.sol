@@ -24,7 +24,6 @@ import "../src/DexAggregatorApp.sol";
 ///                               when APP_PAYMASTER is the zero address)
 ///
 /// Env inputs (optional, with defaults):
-///   QUORUM_BPS                - default 6666 (2-of-3)
 ///   SCORE_THRESHOLD           - default 5000
 ///   MIN_PLATFORM_FEE_WEI      - default 0
 ///   MAX_PLATFORM_FEE_WEI      - default 0.1 ether (1e17)
@@ -45,7 +44,6 @@ contract DeployDexAggregator is Script {
         address feeCollector = vm.envAddress("FEE_COLLECTOR");
 
         // Optional
-        uint256 quorumBps = vm.envOr("QUORUM_BPS", uint256(6666));
         uint256 scoreThreshold = vm.envOr("SCORE_THRESHOLD", uint256(5000));
         uint256 minFee = vm.envOr("MIN_PLATFORM_FEE_WEI", uint256(0));
         uint256 maxFee = vm.envOr("MAX_PLATFORM_FEE_WEI", uint256(0.1 ether));
@@ -78,7 +76,7 @@ contract DeployDexAggregator is Script {
         console.log("PlatformFeeCollector:", platformFeeCollector);
         console.log("AppRegistry:", appRegistry);
         console.log("FeeCollector:", feeCollector);
-        console.log("QuorumBps:", quorumBps);
+        // Quorum is sourced from ValidatorRegistry.quorumBps() at execution time.
         console.log("ScoreThreshold:", scoreThreshold);
         console.log("MinPlatformFeeWei:", minFee);
         console.log("MaxPlatformFeeWei:", maxFee);
@@ -90,7 +88,6 @@ contract DeployDexAggregator is Script {
         DexAggregatorApp app = new DexAggregatorApp(
             deployer,                // _relayer = deployer key
             validatorRegistry,
-            quorumBps,
             scoreThreshold,
             wrappedNative,
             platformFeeCollector,
