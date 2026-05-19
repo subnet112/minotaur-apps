@@ -107,6 +107,7 @@ contract DexAggregatorTest is Test {
             0.1 ether,       // maxPlatformFeeWei
             AppIntentBase.FeeMode.APP,   // app pays, user is WETH-unaware
             address(0),                  // appPaymaster (defaults to feeCollector)
+            address(0),                  // appRegistry — gate off for these tests
             feeCollector,
             5000   // feeBps: 50% of positive slippage
         );
@@ -130,6 +131,7 @@ contract DexAggregatorTest is Test {
             relayerAddr, address(registry), 8000, 5000,
             address(weth), relayerAddr, 0, 0.1 ether,
             AppIntentBase.FeeMode.APP, address(0),
+            address(0),  // appRegistry
             address(0), 5000
         );
     }
@@ -140,6 +142,7 @@ contract DexAggregatorTest is Test {
             relayerAddr, address(registry), 8000, 5000,
             address(weth), relayerAddr, 0, 0.1 ether,
             AppIntentBase.FeeMode.APP, address(0),
+            address(0),  // appRegistry
             feeCollector, 10001
         );
     }
@@ -505,6 +508,7 @@ contract DexAggregatorTest is Test {
             relayerAddr, address(registry), 8000, 5000,
             address(weth), relayerAddr, 0, 0.1 ether,
             AppIntentBase.FeeMode.APP, address(0),
+            address(0),  // appRegistry
             feeCollector, 0
         );
 

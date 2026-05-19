@@ -93,6 +93,7 @@ contract DexAggregatorApp is AppIntentBase {
         uint256 _maxPlatformFeeWei,
         AppIntentBase.FeeMode _feeMode,
         address _appPaymaster,
+        address _appRegistry,
         address _feeCollector,
         uint256 _feeBps
     ) AppIntentBase(
@@ -105,7 +106,8 @@ contract DexAggregatorApp is AppIntentBase {
         _minPlatformFeeWei,
         _maxPlatformFeeWei,
         _feeMode,
-        _appPaymaster == address(0) ? _feeCollector : _appPaymaster
+        _appPaymaster == address(0) ? _feeCollector : _appPaymaster,
+        _appRegistry
     ) {
         require(_feeCollector != address(0), "Invalid fee collector");
         require(_feeBps <= 10000, "Fee too high");
