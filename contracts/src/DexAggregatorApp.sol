@@ -85,7 +85,6 @@ contract DexAggregatorApp is AppIntentBase {
     constructor(
         address _relayer,
         address _validatorRegistry,
-        uint256 _quorumBps,
         uint256 _scoreThreshold,
         address _wrappedNativeToken,
         address _platformFeeCollector,
@@ -99,7 +98,6 @@ contract DexAggregatorApp is AppIntentBase {
     ) AppIntentBase(
         _relayer,
         _validatorRegistry,
-        _quorumBps,
         _scoreThreshold,
         _wrappedNativeToken,
         _platformFeeCollector,
