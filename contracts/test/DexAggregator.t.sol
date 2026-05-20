@@ -95,12 +95,11 @@ contract DexAggregatorTest is Test {
         // approve `amountIn` of `tokenIn`. The app sources the protocol fee
         // in WETH from swap surplus when possible, otherwise from its
         // paymaster (defaulted to feeCollector here).
-        registry = new ValidatorRegistry(relayerAddr, validatorAddrs);
+        registry = new ValidatorRegistry(relayerAddr, validatorAddrs, 8000);
         app = new DexAggregatorApp(
             relayerAddr,
             address(registry),
-            8000,  // quorumBps
-            5000,  // scoreThreshold
+            5000,  // scoreThreshold (quorum sourced from ValidatorRegistry)
             address(weth),   // wrappedNativeToken (WETH for platform fees)
             relayerAddr,     // platformFeeCollector (subnet treasury proxy)
             0,               // minPlatformFeeWei (no floor in tests)
@@ -128,7 +127,7 @@ contract DexAggregatorTest is Test {
     function test_constructor_revert_zeroFeeCollector() public {
         vm.expectRevert("Invalid fee collector");
         new DexAggregatorApp(
-            relayerAddr, address(registry), 8000, 5000,
+            relayerAddr, address(registry), 5000,
             address(weth), relayerAddr, 0, 0.1 ether,
             AppIntentBase.FeeMode.APP, address(0),
             address(0),  // appRegistry
@@ -139,7 +138,7 @@ contract DexAggregatorTest is Test {
     function test_constructor_revert_feeTooHigh() public {
         vm.expectRevert("Fee too high");
         new DexAggregatorApp(
-            relayerAddr, address(registry), 8000, 5000,
+            relayerAddr, address(registry), 5000,
             address(weth), relayerAddr, 0, 0.1 ether,
             AppIntentBase.FeeMode.APP, address(0),
             address(0),  // appRegistry
@@ -505,7 +504,7 @@ contract DexAggregatorTest is Test {
     function test_swap_noFeeWhenZeroFeeBps() public {
         // Deploy app with 0% positive-slippage fee
         DexAggregatorApp noFeeApp = new DexAggregatorApp(
-            relayerAddr, address(registry), 8000, 5000,
+            relayerAddr, address(registry), 5000,
             address(weth), relayerAddr, 0, 0.1 ether,
             AppIntentBase.FeeMode.APP, address(0),
             address(0),  // appRegistry
