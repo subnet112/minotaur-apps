@@ -1,12 +1,14 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides architectural guidance for AI coding agents working in this
+repository. Tool-agnostic — compatible with Anthropic's CLI, Codex, Cursor,
+and similar tools.
 
 ## Repo purpose
 
 App Intent implementations for [Subnet 112 (Minotaur)](https://github.com/subnet112/minotaur_subnet). Each app is a Solidity contract that inherits the platform's `AppIntentBase` plus a JS scoring module that runs in the validator's V8 sandbox. The Bittensor subnet's Solving Engine handles execution; this repo defines *outcome + scoring*, not routing.
 
-The repo also vendors a React swap UI under `frontend/swap/` that the user-facing mainapp consumes as a git submodule (not a standalone package — see "Frontend" below).
+`frontend/swap/` is a standalone Vite + React DEX swap app that is the reference implementation for `DexAggregatorApp`.
 
 ## Commands
 
@@ -23,7 +25,7 @@ forge test --match-contract DexAggregatorTest -vvv
 
 `forge install` is also fine for the submodule on a fresh clone. CI (`.github/workflows/tests.yml`) runs `forge build --sizes` and `forge test -vvv`.
 
-There is no top-level frontend build — `frontend/swap/` has no `package.json` (see below).
+Frontend build lives entirely in `frontend/swap/` — run `pnpm install && pnpm dev` from that directory.
 
 ## Architecture
 
@@ -84,21 +86,50 @@ The relayer pays gas.
 
 ## Frontend (`frontend/swap/`)
 
-**Not a standalone npm package.** No `package.json`, no `node_modules`, no build target. The directory exports React components that import from path-aliased locations (`@/config/chains`, `@/api/client`) which resolve only inside the host application's tsconfig.
+Standalone Vite + React 18 DEX swap app. **No submodule consumption** —
+runs from a clean clone:
 
-`swap.config.ts` is the seam: it re-exports `CHAIN_CONFIG`, `TOKENS`, `DEFAULT_CHAIN_ID` from `@/config/chains` so swap-internal files can use a stable import path while the actual chain config lives in the host. When working in this directory, you cannot run or type-check it in isolation — you need the host app's tsconfig to provide `@/` aliases.
+```bash
+cd frontend/swap && pnpm install && pnpm dev
+```
 
-Stack: React + TanStack Query + zustand (`swap.store.ts`), wagmi/ethers v6 for wallet I/O.
+The design contract (visual JSX + CSS) was lifted from a designer's
+rebuild — every class name, every BracketCorners span, every modal
+z-layer matches the rebuild's prototype. Functional core is the 7 hooks
++ Zustand store + ethers v6 signing path. The 11-field SWAP intent
+encoding is locked by `tests/unit/intent-params.test.ts`.
 
-## `design/dex/` (designer-prototype monorepo)
+Hybrid composition per `docs/superpowers/specs/2026-05-25-phase-12.5-hybrid-rebase-spec.md`:
+- 6 components kept verbatim from the design tree (chrome + simple
+  display: AppPageHeader, HeaderIconButton, WalletConnectPanel,
+  WalletModeBlock, QuoteCard, WalletButton).
+- 6 components rewritten from `archive/frontend-swap/components/`
+  using the design's JSX/CSS (ActionButton, OrderStatusCard,
+  TokenSelectorModal, SettingsSheet, RevealPanel, SwapForm).
 
-`design/dex/minotaur-mainapp-rebuild/` is the unzipped designer rebuild of the user-facing platform shell — an **Astro/Vite pnpm monorepo** (`apps/marketing`, `apps/app`, `apps/docs`, `packages/ui`). It is a **visual-only prototype**: design-locked CSS + JSX in `apps/app/src/pages/dex-aggregator/`, with no real API/wallet integration. See its `HANDOFF_DEX_AGGREGATOR.md` for the contract.
+Toasts use a custom 5-variant `useToast()` from
+`src/components/shell/ToastViewport.tsx` (no sonner). Async flows
+follow the sticky-loading-update idiom — fire `toast.loading({...})`,
+capture the id, transition with `toast.update(id, {...})` on resolve.
 
-The split of responsibility is:
-- `frontend/swap/` (this repo) — the functional implementation: real `/quote` + `/order` calls, wallet providers, store, polling, persistence.
-- `design/dex/.../apps/app/src/pages/dex-aggregator/` — the visual contract: every component, class name, modal, and state variant the design owns.
+Visual regression (`pnpm test:visual`) runs pixelmatch against a 20-state
+baseline captured from the designer rebuild (clipped to the
+swap-surface region). Drift fails CI. Pagewire (`tests/e2e/*.sh`)
+drives the running dev server through deterministic states via URL
+params honored by `useDevPreviewState` (DEV builds only).
 
-Consolidation = port `frontend/swap/` to match the design's JSX/CSS contract while preserving its functional code.
+## Designer rebuild reference (`design/`)
+
+The designer's rebuild — an Astro/Vite pnpm monorepo — was the visual
+source-of-truth during the DEX consolidation. It lives **outside the
+repo** (gitignored at `design/`). Unzip the rebuild locally if you need
+to re-capture visual regression baselines (run `pnpm install` inside
+`design/dex/minotaur-mainapp-rebuild/`, then `pnpm -C apps/app dev`
+to serve it on port 4324, then `pnpm snapshot:baseline` from
+`frontend/swap/`).
+
+The 20 baseline PNGs are committed at `frontend/swap/tests/visual/baseline/`
+so the regression suite works without the source tree.
 
 ## Conventions
 
