@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { Token, QuoteResult, OrderResult, WalletInfo, WalletMode, SwapHistoryItem } from './swap.types'
-import { TOKENS, DEFAULT_CHAIN_ID } from './swap.config'
+import type { Token, QuoteResult, OrderResult, WalletInfo, WalletMode, SwapHistoryItem } from './types'
+import { TOKENS, DEFAULT_CHAIN_ID } from '@/config/chains'
 
 interface SwapState {
   // Wallet

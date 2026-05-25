@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useSwapStore } from '../store'
-import { TOKENS } from '../swap.config'
+import { TOKENS } from '@/config/chains'
 import type { Token } from '../types'
 import * as api from '@/api/client'
 
