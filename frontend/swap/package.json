@@ -15,7 +15,7 @@
     "test": "pnpm run test:unit",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
-    "test:e2e": "bash tests/e2e/swap-happy-path.sh",
+    "test:e2e": "bash tests/e2e/swap-happy-path.sh && bash tests/e2e/wallet-modes.sh && bash tests/e2e/cross-chain.sh",
     "test:visual": "bash tests/visual/diff.sh",
     "snapshot:baseline": "bash tests/visual/capture-baseline.sh",
     "snapshot:current": "bash tests/visual/capture-current.sh"
