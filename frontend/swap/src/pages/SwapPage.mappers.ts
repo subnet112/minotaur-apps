@@ -7,7 +7,7 @@
  * untouched; mappers do the translation. Tested in
  * tests/unit/mappers.test.ts.
  */
-import type { Token, QuoteResult, QuoteDisplay } from '@/types'
+import type { Token, QuoteResult, QuoteDisplay, TokenDisplay } from '@/types'
 import { CHAIN_CONFIG } from '@/config/chains'
 
 interface SwapFormStoreSlice {
@@ -74,6 +74,46 @@ export function mapStoreToSwapFormProps(s: SwapFormStoreSlice): SwapFormProps {
     toIsLoading: s.loading,
     cross: s.isCrossChain,
   }
+}
+
+const ICON_MAP: Record<string, TokenDisplay['iconClass']> = {
+  usdc: 'usdc',
+  usdt: 'usdt',
+  eth: 'eth',
+  weth: 'eth',
+  wbtc: 'wbtc',
+  tao: 'tao',
+  dai: 'dai',
+  arb: 'arb',
+  link: 'link',
+}
+
+/**
+ * Maps an array of functional Tokens (from solver) plus an optional balance
+ * record into TokenDisplay shapes for the TokenSelectorModal.
+ *
+ * @param tokens     Solver token list for the active chain.
+ * @param balances   Map of token address (lower-cased) → human-readable balance string.
+ */
+export function mapSolverTokensToDisplay(
+  tokens: Token[],
+  balances: Record<string, string> = {},
+): TokenDisplay[] {
+  return tokens.map((t) => {
+    const sym = t.symbol.toLowerCase()
+    const addrKey = t.address?.toLowerCase() ?? ''
+    const balance = balances[addrKey] ?? '0'
+    return {
+      symbol: t.symbol,
+      name: t.name ?? t.symbol,
+      glyph: t.symbol.charAt(0).toUpperCase(),
+      iconClass: ICON_MAP[sym] ?? 'unknown',
+      balance,
+      usd: '$0.00',
+      address: t.address,
+      native: t.native,
+    } satisfies TokenDisplay
+  })
 }
 
 /**

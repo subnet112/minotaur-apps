@@ -11,11 +11,13 @@
  *
  * Spec: docs/superpowers/specs/2026-05-25-dex-design-consolidation-design.md §5.3
  */
+import { useMemo } from 'react'
 import { useSwapStore } from '@/store'
 import { selectActionState, selectModeBlockVariant } from '@/selectors'
 import {
   mapStoreToSwapFormProps,
   mapQuoteResultToQuoteCardProps,
+  mapSolverTokensToDisplay,
 } from './SwapPage.mappers'
 import type { Token, TokenDisplay, OrderStep } from '@/types'
 import { CHAIN_CONFIG } from '@/config/chains'
@@ -123,6 +125,16 @@ export default function SwapPage() {
   const outputBalance = useSwapStore((s) => s.outputBalance)
   const slippageBps = useSwapStore((s) => s.slippageBps)
   const loading = useSwapStore((s) => s.loading)
+  const solverTokens = useSwapStore((s) => s.solverTokens)
+
+  // Map solver tokens for active source chain into TokenDisplay for the modal
+  const modalTokens = useMemo(
+    () =>
+      mapSolverTokensToDisplay(
+        solverTokens[sourceChainId] ?? solverTokens[chainId] ?? [],
+      ),
+    [solverTokens, sourceChainId, chainId],
+  )
 
   // Derived
   const actionState = useSwapStore(selectActionState as (s: Parameters<typeof selectActionState>[0]) => ReturnType<typeof selectActionState>)
@@ -313,17 +325,17 @@ export default function SwapPage() {
       {/* Modals (mutually exclusive at z=100) */}
       {overlay === 'token-from' && (
         <TokenSelectorModal
+          tokens={modalTokens}
           oppositeSymbol={outputToken?.symbol ?? ''}
+          canImport={typeof window !== 'undefined' && !!window.ethereum}
+          onCustomImport={makeCustomImportHandler(sourceChainId)}
           onSelect={(t) => {
             // TokenSelectorModal deals in TokenDisplay; map back to a
-            // functional Token by looking up by symbol in the store's
-            // solver tokens, falling back to a minimal object.
-            const solverTokens = useSwapStore.getState().solverTokens
-            const chainTokens = solverTokens[sourceChainId] ?? solverTokens[chainId] ?? []
-            const match = chainTokens.find(
-              (tok) => tok.symbol.toUpperCase() === t.symbol.toUpperCase(),
-            )
-            setInputToken(match ?? tokenFromDisplay(t))
+            // functional Token by looking up by address or symbol in the
+            // store's solver tokens, falling back to a minimal object.
+            const storeTokens = useSwapStore.getState().solverTokens
+            const chainTokens = storeTokens[sourceChainId] ?? storeTokens[chainId] ?? []
+            setInputToken(resolveToken(t, chainTokens) ?? tokenFromDisplay(t))
             setTokenSelectorOpen(null)
           }}
           onClose={() => setTokenSelectorOpen(null)}
@@ -331,15 +343,15 @@ export default function SwapPage() {
       )}
       {overlay === 'token-to' && (
         <TokenSelectorModal
+          tokens={modalTokens}
           oppositeSymbol={inputToken?.symbol ?? ''}
+          canImport={typeof window !== 'undefined' && !!window.ethereum}
+          onCustomImport={makeCustomImportHandler(sourceChainId)}
           onSelect={(t) => {
             // TokenSelectorModal deals in TokenDisplay; map back to functional Token.
-            const solverTokens = useSwapStore.getState().solverTokens
-            const chainTokens = solverTokens[chainId] ?? solverTokens[sourceChainId] ?? []
-            const match = chainTokens.find(
-              (tok) => tok.symbol.toUpperCase() === t.symbol.toUpperCase(),
-            )
-            setOutputToken(match ?? tokenFromDisplay(t))
+            const storeTokens = useSwapStore.getState().solverTokens
+            const chainTokens = storeTokens[chainId] ?? storeTokens[sourceChainId] ?? []
+            setOutputToken(resolveToken(t, chainTokens) ?? tokenFromDisplay(t))
             setTokenSelectorOpen(null)
           }}
           onClose={() => setTokenSelectorOpen(null)}
@@ -366,8 +378,85 @@ function tokenFromDisplay(t: TokenDisplay): Token {
   return {
     symbol: t.symbol,
     name: t.name,
-    address: `0x${'0'.repeat(40)}`,
+    address: t.address ?? `0x${'0'.repeat(40)}`,
     decimals: 18,
     icon: t.glyph,
+    native: t.native,
+  }
+}
+
+/**
+ * Resolves a TokenDisplay back to a functional Token from the solver list.
+ * Prefers address match (exact, case-insensitive), then falls back to symbol.
+ */
+function resolveToken(t: TokenDisplay, chainTokens: Token[]): Token | undefined {
+  if (t.address) {
+    const byAddr = chainTokens.find(
+      (tok) => tok.address?.toLowerCase() === t.address!.toLowerCase(),
+    )
+    if (byAddr) return byAddr
+  }
+  return chainTokens.find(
+    (tok) => tok.symbol.toUpperCase() === t.symbol.toUpperCase(),
+  )
+}
+
+/**
+ * Returns an onCustomImport handler bound to a specific chainId.
+ * Lazy-loads ethers, reads symbol + decimals from the ERC-20 contract,
+ * persists the new token into store.solverTokens, then returns the
+ * TokenDisplay shape for immediate selection.
+ */
+function makeCustomImportHandler(
+  chainId: number,
+): (addr: string) => Promise<TokenDisplay | null> {
+  return async (addr: string): Promise<TokenDisplay | null> => {
+    try {
+      const { ethers } = await import('ethers')
+      if (!window.ethereum) return null
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const erc20 = new ethers.Contract(
+        addr,
+        [
+          'function symbol() view returns (string)',
+          'function decimals() view returns (uint8)',
+        ],
+        provider,
+      )
+      const [symbol, decimals] = await Promise.all([
+        erc20.symbol(),
+        erc20.decimals(),
+      ])
+
+      // Persist into solverTokens so the next open shows it
+      const newToken: Token = {
+        symbol,
+        name: symbol,
+        address: ethers.getAddress(addr),
+        decimals: Number(decimals),
+        icon: symbol.charAt(0),
+      }
+      const existing = useSwapStore.getState().solverTokens[chainId] ?? []
+      useSwapStore.getState().setSolverTokens(chainId, [...existing, newToken])
+
+      // Return display shape for immediate selection
+      const sym = symbol.toLowerCase()
+      const iconMap: Record<string, TokenDisplay['iconClass']> = {
+        usdc: 'usdc', usdt: 'usdt', eth: 'eth', weth: 'eth',
+        wbtc: 'wbtc', tao: 'tao', dai: 'dai', arb: 'arb', link: 'link',
+      }
+      return {
+        symbol,
+        name: symbol,
+        glyph: symbol.charAt(0).toUpperCase(),
+        iconClass: iconMap[sym] ?? 'unknown',
+        balance: '0',
+        usd: '$0.00',
+        address: ethers.getAddress(addr),
+      }
+    } catch (e) {
+      console.error('Custom token import failed:', e)
+      return null
+    }
   }
 }

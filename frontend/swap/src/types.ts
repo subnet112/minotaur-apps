@@ -56,9 +56,11 @@ export interface TokenDisplay {
   symbol: string
   name: string
   glyph: string
-  iconClass: 'usdc' | 'eth' | 'usdt' | 'wbtc' | 'tao' | 'dai' | 'arb' | 'link'
+  iconClass: 'usdc' | 'eth' | 'usdt' | 'wbtc' | 'tao' | 'dai' | 'arb' | 'link' | 'unknown'
   balance: string
   usd: string
+  address?: string   // needed for filter dedup + custom import
+  native?: boolean
 }
 
 export interface QuoteDisplay {

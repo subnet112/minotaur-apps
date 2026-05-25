@@ -5,10 +5,13 @@
  * Search bar at the top, scrollable list below with section dividers
  * (Your balances / Common).
  *
- * Visual-only:
- *   - Search filter is live (substring against symbol or name)
- *   - The opposite-side token renders muted with "ALREADY SELECTED"
- *   - Selection closes the modal and reports the choice to parent
+ * Behaviors:
+ *   - Receives real tokens via props.tokens (no fallback / no empty list).
+ *   - Search filters by symbol, name, or address (substring, case-insensitive).
+ *   - If the query matches /^0x[a-fA-F0-9]{40}$/ and no existing token has
+ *     that address, an "Import token: 0x…" row is shown (requires canImport).
+ *   - The opposite-side token renders muted with "Already selected".
+ *   - Selection closes the modal and reports the choice to parent via onSelect.
  *
  * Lifted markup mirrors components.html section 00.25 (line 9690 +).
  */
@@ -16,23 +19,35 @@ import { useEffect, useMemo, useState } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
 import type { TokenDisplay } from '@/types'
 
-// Pass D will wire real token lists from the store. Until then the modal
-// opens with an empty list (search shows "No matches." immediately).
-const EMPTY_TOKENS: TokenDisplay[] = []
-
 interface TokenSelectorModalProps {
+  /** Real token list for the active chain — no fallback, prop-driven. */
+  tokens: TokenDisplay[]
   /** Token currently selected on the opposite side — rendered muted. */
   oppositeSymbol: string
   onSelect: (token: TokenDisplay) => void
   onClose: () => void
+  /**
+   * Called when the user clicks the "Import token" row. Parent handles the
+   * ethers contract reads and store persistence; this component handles UI
+   * state (pending spinner, error message). Returns the new TokenDisplay, or
+   * null on failure.
+   */
+  onCustomImport?: (address: string) => Promise<TokenDisplay | null>
+  /** When false (or omitted), the import row is never shown. */
+  canImport?: boolean
 }
 
 export default function TokenSelectorModal({
+  tokens,
   oppositeSymbol,
   onSelect,
   onClose,
+  onCustomImport,
+  canImport = false,
 }: TokenSelectorModalProps) {
   const [query, setQuery] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
 
   // Esc dismisses.
   useEffect(() => {
@@ -44,16 +59,53 @@ export default function TokenSelectorModal({
   }, [onClose])
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return EMPTY_TOKENS
     const q = query.trim().toLowerCase()
-    return EMPTY_TOKENS.filter(
-      (t) => t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q),
+    if (!q) return tokens
+    return tokens.filter(
+      (t) =>
+        t.symbol.toLowerCase().includes(q) ||
+        (t.name?.toLowerCase() ?? '').includes(q) ||
+        (t.address?.toLowerCase() ?? '').includes(q),
     )
-  }, [query])
+  }, [tokens, query])
+
+  // Custom-token import detection
+  const trimmedQuery = query.trim()
+  const isAddrQuery = /^0x[a-fA-F0-9]{40}$/.test(trimmedQuery)
+  const existingAddrMatch = isAddrQuery
+    ? tokens.some(
+        (t) => t.address?.toLowerCase() === trimmedQuery.toLowerCase(),
+      )
+    : false
+  const showImportRow =
+    isAddrQuery && !existingAddrMatch && canImport && !!onCustomImport
 
   // Partition into "Your balances" (balance > 0) and "Common" (the rest).
-  const withBalance = filtered.filter((t) => parseFloat(t.balance.replace(/,/g, '')) > 0)
-  const common = filtered.filter((t) => parseFloat(t.balance.replace(/,/g, '')) === 0)
+  const withBalance = filtered.filter(
+    (t) => parseFloat((t.balance ?? '0').replace(/,/g, '')) > 0,
+  )
+  const common = filtered.filter(
+    (t) => parseFloat((t.balance ?? '0').replace(/,/g, '')) <= 0,
+  )
+
+  async function handleImport() {
+    if (!onCustomImport || importing) return
+    setImporting(true)
+    setImportError(null)
+    try {
+      const result = await onCustomImport(trimmedQuery)
+      if (result) {
+        onSelect(result)
+        onClose()
+      } else {
+        setImportError('Failed to load token — check the address')
+      }
+    } catch {
+      setImportError('Failed to load token — check the address')
+    } finally {
+      setImporting(false)
+    }
+  }
 
   return (
     <ModalBackdrop onClose={onClose}>
@@ -79,14 +131,56 @@ export default function TokenSelectorModal({
             type="text"
             placeholder="Search by name, symbol, or address…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setImportError(null)
+            }}
             autoFocus
           />
           <span className="kbd">Esc</span>
         </div>
 
         <div className="sw-tmod-list">
-          {filtered.length === 0 && (
+          {/* Import row — shown when query is a full address not in the list */}
+          {showImportRow && (
+            <div
+              className={`sw-tmod-row sw-tmod-import${importing ? ' is-pending' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={importing ? undefined : handleImport}
+              onKeyDown={(e) => {
+                if (importing) return
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  handleImport()
+                }
+              }}
+            >
+              <span className="ico unknown">
+                {importing ? <SpinnerGlyph /> : '+'}
+              </span>
+              <span className="meta">
+                <span className="sym">Import token</span>
+                <span className="name">
+                  {trimmedQuery.slice(0, 10)}…{trimmedQuery.slice(-8)}
+                </span>
+              </span>
+              <span className="right">
+                {importing && <span className="bal">Loading…</span>}
+              </span>
+            </div>
+          )}
+
+          {/* Error from failed import */}
+          {importError && (
+            <div className="sw-tmod-empty">
+              <p className="title">Import failed.</p>
+              <p className="helper">{importError}</p>
+            </div>
+          )}
+
+          {/* Empty state — shown when no import row and no filtered results */}
+          {!showImportRow && filtered.length === 0 && !importError && (
             <div className="sw-tmod-empty">
               <p className="title">No matches.</p>
               <p className="helper">Try a different symbol, name, or paste an address</p>
@@ -101,10 +195,13 @@ export default function TokenSelectorModal({
               </div>
               {withBalance.map((t) => (
                 <TokenRow
-                  key={t.symbol}
+                  key={t.address ?? t.symbol}
                   token={t}
                   disabled={t.symbol === oppositeSymbol}
-                  onClick={() => onSelect(t)}
+                  onClick={() => {
+                    onSelect(t)
+                    onClose()
+                  }}
                 />
               ))}
             </>
@@ -118,10 +215,13 @@ export default function TokenSelectorModal({
               </div>
               {common.map((t) => (
                 <TokenRow
-                  key={t.symbol}
+                  key={t.address ?? t.symbol}
                   token={t}
                   disabled={t.symbol === oppositeSymbol}
-                  onClick={() => onSelect(t)}
+                  onClick={() => {
+                    onSelect(t)
+                    onClose()
+                  }}
                 />
               ))}
             </>
@@ -216,6 +316,21 @@ function SearchGlyph() {
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
       <circle cx="6" cy="6" r="4" stroke="currentColor" strokeWidth="1.2" />
       <path d="M9 9 L 13 13" stroke="currentColor" strokeWidth="1.2" strokeLinecap="square" />
+    </svg>
+  )
+}
+
+function SpinnerGlyph() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+      style={{ animation: 'spin 1s linear infinite' }}
+    >
+      <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 10" />
     </svg>
   )
 }
