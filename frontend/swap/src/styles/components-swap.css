@@ -473,6 +473,64 @@
   color: var(--cretan);
 }
 
+/* Chain picker dropdown — absolutely positioned below the chain pill.
+   Design-pending inline fallback UI; minimal chrome using design tokens. */
+.sw-chain-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  z-index: 20;
+  background: var(--surf-card, #2A2A2A);
+  border: 1px solid var(--hairline-stronger);
+  display: flex;
+  flex-direction: column;
+}
+.sw-chain-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 9px 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mist);
+  cursor: pointer;
+  transition: color 120ms var(--ease), background 120ms var(--ease);
+}
+.sw-chain-dropdown-item:last-child { border-bottom: 0; }
+.sw-chain-dropdown-item:hover {
+  color: var(--bone);
+  background: rgba(232, 232, 232, 0.05);
+}
+
+/* ---------- MetaMask recipient import button ---------- */
+/* Small ghost chip shown next to the EVM recipient input when MetaMask is
+   available. Styled to match the design system's tertiary button family. */
+.sw-recipient-mm {
+  align-self: flex-start;
+  margin-top: -2px;
+  padding: 4px 10px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mist);
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  cursor: pointer;
+  transition: color 120ms var(--ease), border-color 120ms var(--ease);
+}
+.sw-recipient-mm:hover {
+  color: var(--bone);
+  border-color: var(--bone);
+}
+
 /* =========================================================================
    00.25 · TOKEN SELECTOR MODAL (.sw-tmod)
    Centered overlay ~440px wide. Header + search + scroll list.

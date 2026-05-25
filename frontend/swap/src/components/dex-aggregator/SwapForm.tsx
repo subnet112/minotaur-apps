@@ -12,13 +12,16 @@
  *   - Direction swap calls `onSwapDirection` (no-op in cross-chain).
  *   - Cross-chain toggle calls `onToggleCross`.
  *   - Cog calls `onOpenSettings`; slip readout pre-focuses slippage.
+ *   - Chain pills open an inline dropdown listing chains from CHAIN_CONFIG.
+ *     Selecting a chain calls `onPickFromChain(chainId)` / `onPickToChain(chainId)`.
  *
  * Lifted markup mirrors components.html section 00.24 (line 9245 +).
  */
-import { useId } from 'react'
+import { useId, useState, useRef, useEffect } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
 import type { ActionState, DesignWalletMode, TokenDisplay } from '@/types'
 import ActionButton from './ActionButton'
+import { CHAIN_CONFIG } from '@/config/chains'
 
 interface SwapFormProps {
   /** Top-line slippage readout. */
@@ -59,9 +62,9 @@ interface SwapFormProps {
   cross: boolean
   onToggleCross: () => void
 
-  /** Chain pill clicks — design pending (no-op for now). */
-  onPickFromChain?: () => void
-  onPickToChain?: () => void
+  /** Chain pill clicks — opens inline chain dropdown; receives selected chainId. */
+  onPickFromChain?: (chainId: number) => void
+  onPickToChain?: (chainId: number) => void
 
   /** Recipient field — surfaces when `cross && wallet==='bittensor'`. */
   showRecipient: boolean
@@ -92,6 +95,27 @@ export default function SwapForm(props: SwapFormProps) {
   const fromInputId = useId()
   const toInputId = useId()
 
+  const [showFromDropdown, setShowFromDropdown] = useState(false)
+  const [showToDropdown, setShowToDropdown] = useState(false)
+  const fromDropdownRef = useRef<HTMLDivElement>(null)
+  const toDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (fromDropdownRef.current && !fromDropdownRef.current.contains(e.target as Node)) {
+        setShowFromDropdown(false)
+      }
+      if (toDropdownRef.current && !toDropdownRef.current.contains(e.target as Node)) {
+        setShowToDropdown(false)
+      }
+    }
+    if (showFromDropdown || showToDropdown) {
+      document.addEventListener('mousedown', handleClick)
+      return () => document.removeEventListener('mousedown', handleClick)
+    }
+  }, [showFromDropdown, showToDropdown])
+
   return (
     <form className="sw-form sw-card" onSubmit={(e) => e.preventDefault()}>
       <BracketCorners />
@@ -117,23 +141,77 @@ export default function SwapForm(props: SwapFormProps) {
       <div className="sw-form-body">
         {/* Chain selector — single pill or x-chain pair */}
         <div className="sw-chains">
-          <button className={`sw-chain ${props.cross ? '' : 'is-active'}`.trim()} type="button" onClick={props.onPickFromChain}>
-            <span className={`logo ${props.fromChainIconClass}`}>{props.fromChainGlyph}</span>
-            <span className="name">{props.fromChainName}</span>
-            <span className="chev" aria-hidden="true">
-              <ChevronDown />
-            </span>
-          </button>
+          <div ref={fromDropdownRef} style={{ position: 'relative', flex: 1 }}>
+            <button
+              className={`sw-chain ${props.cross ? '' : 'is-active'}`.trim()}
+              style={{ width: '100%' }}
+              type="button"
+              onClick={() => setShowFromDropdown((v) => !v)}
+              aria-haspopup="listbox"
+              aria-expanded={showFromDropdown}
+            >
+              <span className={`logo ${props.fromChainIconClass}`}>{props.fromChainGlyph}</span>
+              <span className="name">{props.fromChainName}</span>
+              <span className="chev" aria-hidden="true">
+                <ChevronDown />
+              </span>
+            </button>
+            {showFromDropdown && (
+              <div className="sw-chain-dropdown" role="listbox" aria-label="Select source chain">
+                {Object.entries(CHAIN_CONFIG).map(([id, cfg]) => (
+                  <button
+                    key={id}
+                    className="sw-chain-dropdown-item"
+                    role="option"
+                    type="button"
+                    onClick={() => {
+                      props.onPickFromChain?.(Number(id))
+                      setShowFromDropdown(false)
+                    }}
+                  >
+                    {cfg.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {props.cross && props.toChainName && (
             <>
               <span className="sw-chain-route" aria-hidden="true">→</span>
-              <button className="sw-chain" type="button" onClick={props.onPickToChain}>
-                <span className={`logo ${props.toChainIconClass}`}>{props.toChainGlyph}</span>
-                <span className="name">{props.toChainName}</span>
-                <span className="chev" aria-hidden="true">
-                  <ChevronDown />
-                </span>
-              </button>
+              <div ref={toDropdownRef} style={{ position: 'relative', flex: 1 }}>
+                <button
+                  className="sw-chain"
+                  style={{ width: '100%' }}
+                  type="button"
+                  onClick={() => setShowToDropdown((v) => !v)}
+                  aria-haspopup="listbox"
+                  aria-expanded={showToDropdown}
+                >
+                  <span className={`logo ${props.toChainIconClass}`}>{props.toChainGlyph}</span>
+                  <span className="name">{props.toChainName}</span>
+                  <span className="chev" aria-hidden="true">
+                    <ChevronDown />
+                  </span>
+                </button>
+                {showToDropdown && (
+                  <div className="sw-chain-dropdown" role="listbox" aria-label="Select destination chain">
+                    {Object.entries(CHAIN_CONFIG).map(([id, cfg]) => (
+                      <button
+                        key={id}
+                        className="sw-chain-dropdown-item"
+                        role="option"
+                        type="button"
+                        onClick={() => {
+                          props.onPickToChain?.(Number(id))
+                          setShowToDropdown(false)
+                        }}
+                      >
+                        {cfg.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
           <button
