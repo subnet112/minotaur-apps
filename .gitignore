@@ -22,3 +22,8 @@ build/
 # Local agent tooling (not part of the project)
 pagewire-main/
 pagewire-main.zip
+
+# Designer reference tree (unzip locally to re-capture visual baselines).
+# Visual baselines themselves (PNGs) live committed at
+# frontend/swap/tests/visual/baseline/ — no need to ship the source tree.
+design/
