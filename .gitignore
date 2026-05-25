@@ -18,3 +18,7 @@ broadcast/
 node_modules/
 dist/
 build/
+
+# Local agent tooling (not part of the project)
+pagewire-main/
+pagewire-main.zip
