@@ -1,0 +1,22 @@
+[
+  { "id": "01-disconnected-idle",          "params": "wallet=disconnected&form=idle" },
+  { "id": "02-metamask-idle",              "params": "wallet=metamask&form=idle" },
+  { "id": "03-metamask-quote-loading",     "params": "wallet=metamask&form=quote-loading" },
+  { "id": "04-metamask-quoted",            "params": "wallet=metamask&form=quoted" },
+  { "id": "05-metamask-order-pending",     "params": "wallet=metamask&form=order&order=pending" },
+  { "id": "06-metamask-order-filled",      "params": "wallet=metamask&form=order&order=filled" },
+  { "id": "07-metamask-order-failed",      "params": "wallet=metamask&form=order&order=failed" },
+  { "id": "08-managed-create",             "params": "wallet=managed&mode=create-wallet" },
+  { "id": "09-managed-fund-quoted",        "params": "wallet=managed&mode=fund-wallet&form=quoted" },
+  { "id": "10-metamask-approval",          "params": "wallet=metamask&mode=approval&form=quoted" },
+  { "id": "11-bittensor-setup-proxy",      "params": "wallet=bittensor&mode=setup-proxy" },
+  { "id": "12-bittensor-cross-quoted",     "params": "wallet=bittensor&cross=1&form=quoted" },
+  { "id": "13-wcp-managed",                "params": "overlay=wallet-panel&tab=managed" },
+  { "id": "14-wcp-metamask",               "params": "overlay=wallet-panel&tab=metamask" },
+  { "id": "15-wcp-bittensor",              "params": "overlay=wallet-panel&tab=bittensor" },
+  { "id": "16-token-selector",             "params": "overlay=token-from" },
+  { "id": "17-settings",                   "params": "overlay=settings" },
+  { "id": "18-settings-high-slippage",     "params": "overlay=settings&slippage=10" },
+  { "id": "19-history",                    "params": "history=1" },
+  { "id": "20-debug",                      "params": "debug=1&debugPanel=1" }
+]
