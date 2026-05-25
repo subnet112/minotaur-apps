@@ -1,0 +1,503 @@
+/* =========================================================================
+   extensions.css — app-local additions for elements the design system
+   hasn't formally spec'd yet. Keep this file LEAN — every rule here is a
+   candidate for promotion into components.css once the design catches up.
+   ========================================================================= */
+
+/* ⌘K trigger button in the right region of the app header.
+   The 00.01 spec mentions a "header icon" trigger but doesn't define its
+   styling. Treating it as a minimal mono affordance using the existing
+   .app-cmdk-kbd primitive inside a quiet button frame. */
+.app-h-cmdk-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 22px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--hairline);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mist);
+  transition: color 160ms var(--ease), background 160ms var(--ease);
+}
+.app-h-cmdk-trigger:hover {
+  color: var(--bone);
+  background: rgba(232, 232, 232, 0.02);
+}
+.app-h-cmdk-trigger:focus-visible {
+  outline: 1px solid var(--lime);
+  outline-offset: -2px;
+}
+
+/* =========================================================================
+   Header responsive plan (per shell audit Q5 resolution).
+   No mobile menu — same component, tightens with viewport.
+   ========================================================================= */
+
+@media (max-width: 1279px) {
+  .app-h-brand { gap: 12px; padding: 0 20px; }
+  .app-h-nav { gap: 22px; padding: 0 24px; }
+}
+
+@media (max-width: 1099px) {
+  /* Drop the "App" scope chip below this breakpoint */
+  .app-h-brand .scope { display: none; }
+  .app-h-nav { gap: 18px; padding: 0 20px; }
+  .app-h-cmdk-trigger { padding: 0 16px; }
+}
+
+@media (max-width: 879px) {
+  /* Tighter still — labels start to overflow scroll */
+  .app-h-brand { padding: 0 16px; }
+  .app-h-nav { gap: 14px; padding: 0 14px; font-size: 10px; }
+  .app-h-tab { font-size: 10px; }
+  .app-h-cmdk-trigger { padding: 0 14px; font-size: 10px; }
+}
+
+@media (max-width: 639px) {
+  /* Wordmark shrinks; nav becomes horizontally scrollable.
+     Modest taper from the 16 px desktop baseline. */
+  .app-h-brand .lockup { height: 14px; }
+  .app-h-cmdk-trigger { padding: 0 12px; }
+  .app-h-cmdk-trigger .app-cmdk-kbd--quiet { display: none; }
+  .app-h-cmdk-trigger::after { content: '⌘K'; font-size: 10px; }
+}
+
+/* =========================================================================
+   Page header — transparent background so the Vestige bg shows through
+   on every route. Structural pieces (hairline dividers, padding, layout)
+   stay; only the surface fill changes.
+   ========================================================================= */
+.page-h {
+  background: transparent !important;
+}
+
+/* =========================================================================
+   App card · FEATURED + LIVE pill row — bump the inter-pill gap so the
+   two badges have visual breathing room. Design CSS sets gap: 6px; user
+   wanted more.
+   ========================================================================= */
+.app-card-pills {
+  gap: 12px;
+}
+
+/* =========================================================================
+   Marketplace grid — fixed 4 columns at desktop so single search results
+   stay at the same card width as a full row of 4. Collapses on narrower
+   viewports (3 → 2 → 1 cols) the way the design system collapses other
+   card grids.
+   ========================================================================= */
+.marketplace-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 1279px) {
+  .marketplace-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 879px) {
+  .marketplace-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 539px) {
+  .marketplace-grid { grid-template-columns: 1fr; }
+}
+
+/* =========================================================================
+   Recent Orders — header "VIEW ALL" link
+   ----------------------------------------------------------------------
+   Was inline-styled with onMouseEnter/Leave manipulating .style.color
+   (fragile, fires on every render, doesn't honor :focus-visible). Move
+   to a real class with native :hover + :focus-visible.
+   ========================================================================= */
+.recent-orders-link {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mist);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 160ms var(--ease);
+}
+.recent-orders-link:hover,
+.recent-orders-link:focus-visible {
+  color: var(--lime);
+  outline: none;
+}
+
+/* =========================================================================
+   /skills + /skills/deploy — full-page coming-soon empty state
+   ----------------------------------------------------------------------
+   Single bracket-cornered container that fills the content area, with
+   centered messaging (grid glyph + eyebrow + headline). Diagonal-stripe
+   texture inside reads as "ready to be filled" without being noisy.
+   No CTA — guide page doesn't exist yet (user direction).
+   ========================================================================= */
+.skills-empty {
+  position: relative;
+  background: var(--surf-card);
+  border: 1px solid var(--hairline);
+  min-height: 540px;
+  display: grid;
+  place-items: center;
+  padding: 64px 32px;
+  /* Subtle diagonal stripes — atmospheric, doesn't fight the messaging */
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(232, 232, 232, 0.018) 0 1px,
+    transparent 1px 12px
+  );
+}
+.skills-empty > .ct {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: var(--mist);
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.skills-empty > .ct.tl { top: -1px; left: -1px;   border-top-width: 1px;    border-left-width: 1px;  }
+.skills-empty > .ct.tr { top: -1px; right: -1px;  border-top-width: 1px;    border-right-width: 1px; }
+.skills-empty > .ct.bl { bottom: -1px; left: -1px;  border-bottom-width: 1px; border-left-width: 1px;  }
+.skills-empty > .ct.br { bottom: -1px; right: -1px; border-bottom-width: 1px; border-right-width: 1px; }
+
+.skills-empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  text-align: center;
+  max-width: 460px;
+}
+
+.skills-empty-glyph {
+  color: var(--mist);
+  display: inline-flex;
+  margin-bottom: 4px;
+}
+
+.skills-empty-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--mist);
+  font-feature-settings: var(--tnum);
+}
+.skills-empty-eyebrow .sq {
+  width: 5px;
+  height: 5px;
+  background: var(--lime);
+  display: inline-block;
+}
+.skills-empty-eyebrow .sep {
+  color: var(--stone);
+}
+
+.skills-empty-headline {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 30px;
+  line-height: 1.2;
+  letter-spacing: -0.018em;
+  color: var(--bone);
+  margin: 0;
+  max-width: 440px;
+}
+
+/* =========================================================================
+   /apps/deploy — two-column DeployStage wrapper
+   ----------------------------------------------------------------------
+   Outer composition that contains the AI Generator + App Configuration
+   in the main column and Deployer Wallet as a sticky sidebar.
+   Bracket corners use STONE (dimmer than the inner .df-form mist arms)
+   so the outer reads as a containing frame rather than competing with
+   the inner card edges — matches the .m-shell > .stat-tile precedent
+   where outer = full intensity, inner = lighter.
+   ========================================================================= */
+.deploy-stage {
+  position: relative;
+  background: var(--surf-card);
+  border: 1px solid var(--hairline);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.deploy-stage > .ct {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-color: var(--stone); /* dimmer than inner .df-form arms */
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.deploy-stage > .ct.tl { top: -1px; left: -1px;   border-top-width: 1px;    border-left-width: 1px;  }
+.deploy-stage > .ct.tr { top: -1px; right: -1px;  border-top-width: 1px;    border-right-width: 1px; }
+.deploy-stage > .ct.bl { bottom: -1px; left: -1px;  border-bottom-width: 1px; border-left-width: 1px;  }
+.deploy-stage > .ct.br { bottom: -1px; right: -1px; border-bottom-width: 1px; border-right-width: 1px; }
+
+.deploy-stage-crumb {
+  /* Crumb floats above the column grid. No border-bottom — the first
+     card's top border IS the rule. Adding one here produced a doubled
+     hairline that competed with the card edge. */
+  padding-bottom: 0;
+}
+
+.deploy-stage-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(360px, 400px);
+  gap: 28px;
+  align-items: start;
+}
+
+/* Vertical hairline divider between main + sidebar — rendered as a
+   pseudo-element on the grid track so it doesn't need a real DOM node. */
+.deploy-stage-grid::before {
+  content: '';
+  grid-column: 2;
+  grid-row: 1;
+  width: 1px;
+  background: var(--hairline);
+  align-self: stretch;
+}
+
+.deploy-stage-main {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0; /* prevents code editors from blowing out the column */
+}
+
+.deploy-stage-sidebar {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* "── or fill manually ──" divider in the main column */
+.deploy-stage-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 4px 0;
+}
+.deploy-stage-divider .line {
+  flex: 1;
+  height: 1px;
+  background: repeating-linear-gradient(
+    to right,
+    var(--hairline-strong) 0 3px,
+    transparent 3px 7px
+  );
+}
+.deploy-stage-divider .label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--stone);
+}
+
+/* Responsive collapse — stack columns below 980px so the sidebar drops
+   under the main column on narrow viewports. */
+@media (max-width: 979px) {
+  .deploy-stage-grid {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+  .deploy-stage-grid::before { display: none; }
+  .deploy-stage-sidebar {
+    position: static;
+    top: auto;
+  }
+}
+
+/* =========================================================================
+   Create Order — surface hierarchy
+   ----------------------------------------------------------------------
+   `.of-form` and `.of-options` both ship with var(--surf-card) in the
+   design CSS, which makes the collapsible Order Options card visually
+   identical to the surrounding form. Drop the options card one shade
+   darker so the collapsible reads as a nested container — matches the
+   "card-in-card" hierarchy the rest of the design system uses (m-shell
+   inside main bg, exec-card inside m-shell, etc.).
+   ========================================================================= */
+.of-options {
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.10)),
+    var(--surf-card);
+}
+
+/* =========================================================================
+   Miners — list cap + scroll
+   ----------------------------------------------------------------------
+   Solver Submissions and App Execution Stats both render dense rows from
+   a live API. With 42+ submissions or many deployed apps, the lists
+   stretch the surrounding CSS grid and make the parallel column look
+   oddly tall by comparison. The legacy capped both at 320px (max-h-80)
+   with a scrollbar; we use 520px here to fit the design's larger row
+   padding while still containing the growth.
+   ========================================================================= */
+.solv-list,
+.exec-list {
+  max-height: 520px;
+  overflow-y: auto;
+  /* Subtle scrollbar that fits the design tokens — Firefox + Chromium */
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-strong) transparent;
+}
+.solv-list::-webkit-scrollbar,
+.exec-list::-webkit-scrollbar {
+  width: 6px;
+}
+.solv-list::-webkit-scrollbar-track,
+.exec-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.solv-list::-webkit-scrollbar-thumb,
+.exec-list::-webkit-scrollbar-thumb {
+  background: var(--hairline-stronger);
+  border-radius: 0;
+}
+.solv-list::-webkit-scrollbar-thumb:hover,
+.exec-list::-webkit-scrollbar-thumb:hover {
+  background: var(--mist);
+}
+
+/* =========================================================================
+   00.21 · BOTTOM CALLOUT — viewport mount + slide animation
+   ----------------------------------------------------------------------
+   The static .app-callout chrome lives in components.css (lifted from
+   the prototype). This block carries the bits that only apply when the
+   callout is mounted in-app: fixed-position pinning to the viewport
+   bottom, the 200 ms slide-in on first render, and the slide-down on
+   dismiss. Per the design's v6 ("In context · viewport"): bar stays
+   while body content above scrolls.
+   ========================================================================= */
+.app-callout-mount {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  /* Sits below the toast viewport (z=120) but above page content. */
+  transform: translateY(100%);
+  transition: transform 200ms var(--ease);
+  pointer-events: none;
+}
+.app-callout-mount.is-visible {
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.app-callout-mount.is-leaving {
+  transform: translateY(100%);
+}
+
+/* By design (per user direction): the callout OVERLAYS page + footer
+   rather than reserving its own strip. When scrolled to the bottom of a
+   long route the bar sits visually on top of the last ~48 px of
+   content; dismissing it reveals what was underneath. This matches the
+   conventional cookie/announcement-bar pattern and keeps the page
+   layout stable regardless of bar state. */
+
+@media (max-width: 540px) {
+  /* Callout copy is dense; on narrow screens the optional .ref tail
+     truncates first so the eyebrow + key message stay legible. */
+  .app-callout { padding: 12px 16px; gap: 12px; }
+  .app-callout-body .msg .ref { display: none; }
+  .app-callout-actions { gap: 8px; }
+}
+
+/* =========================================================================
+   DexAggregator layout-prototype scaffolding
+   ----------------------------------------------------------------------
+   Not part of the formal design catalog — internal chrome for the
+   handoff prototype only. Lives here (extensions.css) rather than in
+   components.css so it stays clearly app-local. The minotaur-apps team
+   doesn't need any of this in production: ignore .dex-content {
+  width: 100%;
+  max-width: 580px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Override .sw-form's fixed 440 px width so it fills .dex-content.
+   The form's internal grid + padding are unchanged — every cell
+   just gets slightly more horizontal breathing room. */
+.dex-content .sw-form {
+  width: 100%;
+}
+
+/* Tighten the .swap-row 4-column gap from 22 → 14 inside the dex
+   page. The 22 px default works in the prototype showcase where the
+   panel ships at 720 px wide; inside our 580 px column the wider
+   gap pushes the pair column too narrow and the from/to amounts
+   read as cramped. Pulling the gap in claws back ~24 px for the
+   pair without touching the prototype's row CSS more broadly. */
+.dex-content .swap-row {
+  gap: 14px;
+}
+
+/* .app-ph treatment override
+   ---------------------------------------------------------------
+   The lifted prototype rule uses `background: var(--surf-onyx)` —
+   a solid fill that worked on the showcase page (whose page bg is
+   also --surf-onyx) but blocks the Vestige atmospheric background
+   here. Per 00.18 anatomy: "No fill change, no shadow" — the
+   strip is defined by its hairlines, not a fill.
+   ---------------------------------------------------------------
+   Fully transparent so the Vestige texture reads continuously
+   between the platform .app-h above (which has its own 94% opaque
+   strip with backdrop blur) and the swap content below. The
+   bottom hairline-stronger border still draws the separator the
+   user asked us to keep. */
+.app-ph {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+}
+
+/* .app-toast head bottom padding
+   ---------------------------------------------------------------
+   The lifted prototype rule sets `padding: 14px 14px 0 14px` on
+   .app-toast-head — bottom is 0 because the prototype expected a
+   .app-toast-foot below it to provide spacing.
+   ---------------------------------------------------------------
+   For our most common toasts (success/error/info with just a
+   title, no foot), the content ends up flush with the toast's
+   bottom edge — the bracket corners then visually look like
+   they're dangling below the content because there's no breathing
+   room between the title and the bottom of the box.
+   ---------------------------------------------------------------
+   Use :has() to add bottom padding ONLY when the foot is absent,
+   so the foot-present case still gets the foot's own padding
+   without double-spacing. */
+.app-toast .app-toast-head { padding-bottom: 14px; }
+.app-toast:has(.app-toast-foot) .app-toast-head { padding-bottom: 0; }
+
+.dex-content .sw-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* State switcher — chips that drive the URL params */

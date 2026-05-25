@@ -28,3 +28,6 @@ export type OrderStatusValue =
   | 'cancelled'
 
 export type { QuoteResult, OrderResult, WalletInfo, ChainInfo }
+
+/** Toast variants emitted by the design's shell ToastProvider. */
+export type ToastVariant = 'success' | 'error' | 'info' | 'loading' | 'transient'
