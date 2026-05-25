@@ -2,18 +2,17 @@
  * RevealPanel — 00.23 Inline reveal panel.
  *
  * Two role flavours under one chrome:
- *   - 'history' → Recent Swaps (list of past swap rows from mock data)
+ *   - 'history' → Recent Swaps (list of past swap rows from store)
  *   - 'debug'   → Debug Info (4-field grid + Quote JSON / Order JSON disclosures)
  *
  * Lifted markup mirrors components.html section 00.23 (line 8635 + 8801).
  */
 import { useState } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
-import type { DesignWalletMode, RecentSwapDisplay } from '@/types'
-
-// Pass C will wire real history from the store.
-// Until then, recent swaps render the empty-state UI.
-const RECENT_SWAPS: RecentSwapDisplay[] = []
+import { useSwapStore } from '@/store'
+import { useToast } from '@/components/shell/ToastViewport'
+import { CHAIN_CONFIG } from '@/config/chains'
+import type { DesignWalletMode, SwapHistoryItem } from '@/types'
 
 type PanelRole = 'history' | 'debug'
 
@@ -33,9 +32,7 @@ export default function RevealPanel({ role, wallet, onClose }: RevealPanelProps)
         <span className="eyebrow">
           <span className="glyph" aria-hidden="true" />
           <span>{role === 'history' ? 'Recent swaps' : 'Debug info'}</span>
-          {role === 'history' && (
-            <span className="ct-count">{String(RECENT_SWAPS.length).padStart(2, '0')}&nbsp;TOTAL</span>
-          )}
+          {role === 'history' && <HistoryCount />}
         </span>
         <span className="ln" aria-hidden="true" />
         <button className="x" type="button" aria-label="Close panel" onClick={onClose}>
@@ -50,8 +47,45 @@ export default function RevealPanel({ role, wallet, onClose }: RevealPanelProps)
   )
 }
 
+/** Count badge — reads recentSwaps.length from store reactively. */
+function HistoryCount() {
+  const count = useSwapStore((s) => s.recentSwaps.length)
+  return (
+    <span className="ct-count">{String(count).padStart(2, '0')}&nbsp;TOTAL</span>
+  )
+}
+
+/** Map SwapHistoryItem.status → design badge modifier. */
+function statusToBadge(status: string): 'confirmed' | 'pending' | 'failed' {
+  if (status === 'filled') return 'confirmed'
+  if (status === 'failed') return 'failed'
+  return 'pending'
+}
+
+/** Format a unix ms timestamp to a short relative label (e.g. "2h ago"). */
+function timeAgo(timestamp: number): string {
+  const diffMs = Date.now() - timestamp
+  const diffSec = Math.floor(diffMs / 1000)
+  if (diffSec < 60) return `${diffSec}s ago`
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDy = Math.floor(diffHr / 24)
+  return `${diffDy}d ago`
+}
+
+/** Truncate a hex hash to first 4 + last 4 chars for display. */
+function truncateHash(hash: string): string {
+  if (!hash || hash.length <= 10) return hash
+  return `${hash.slice(0, 6)}…${hash.slice(-4)}`
+}
+
 function HistoryBody() {
-  if (RECENT_SWAPS.length === 0) {
+  const recentSwaps = useSwapStore((s) => s.recentSwaps)
+  const toast = useToast()
+
+  if (recentSwaps.length === 0) {
     return (
       <>
         <p className="app-rpanel-empty-title">No swaps yet.</p>
@@ -59,62 +93,109 @@ function HistoryBody() {
       </>
     )
   }
+
+  function handleCopyHash(swap: SwapHistoryItem) {
+    const hash = swap.txHash || swap.orderId
+    navigator.clipboard.writeText(hash).then(() => {
+      toast.transient({ title: `Hash copied · ${truncateHash(hash)}` })
+    }).catch(() => {
+      toast.error({ title: 'Copy failed' })
+    })
+  }
+
   return (
     <>
-      {RECENT_SWAPS.map((s, idx) => (
-        <a key={idx} className="swap-row" href="#" onClick={(e) => e.preventDefault()}>
-          <span className="swap-row-pair">
-            <span className="swap-row-tok">
-              <span className="swap-row-tok-mark">{s.fromGlyph}</span>
-              <span className="swap-row-tok-amt">
-                <span className="a">{s.fromAmount}</span>
-                <span className="s">{s.fromSymbol}</span>
+      {recentSwaps.map((swap) => {
+        const badge = statusToBadge(swap.status)
+        const explorerUrl = CHAIN_CONFIG[swap.chainId]?.explorer ?? ''
+        const txHash = swap.txHash || ''
+        const explorerHref = txHash && explorerUrl
+          ? `${explorerUrl}/tx/${txHash}`
+          : '#'
+        const hashDisplay = truncateHash(txHash || swap.orderId)
+
+        return (
+          <a
+            key={swap.orderId}
+            className="swap-row"
+            href={explorerHref}
+            target={explorerHref !== '#' ? '_blank' : undefined}
+            rel="noopener noreferrer"
+            onClick={explorerHref === '#' ? (e) => e.preventDefault() : undefined}
+          >
+            <span className="swap-row-pair">
+              <span className="swap-row-tok">
+                <span className="swap-row-tok-mark">{swap.inputToken.charAt(0)}</span>
+                <span className="swap-row-tok-amt">
+                  <span className="a">{swap.inputAmount}</span>
+                  <span className="s">{swap.inputToken}</span>
+                </span>
+              </span>
+              <span className="swap-row-arr" aria-hidden="true">→</span>
+              <span className="swap-row-tok">
+                <span className="swap-row-tok-mark">{swap.outputToken.charAt(0)}</span>
+                <span className="swap-row-tok-amt">
+                  <span className="a">{swap.outputAmount}</span>
+                  <span className="s">{swap.outputToken}</span>
+                </span>
               </span>
             </span>
-            <span className="swap-row-arr" aria-hidden="true">→</span>
-            <span className="swap-row-tok">
-              <span className="swap-row-tok-mark">{s.toGlyph}</span>
-              <span className="swap-row-tok-amt">
-                <span className="a">{s.toAmount}</span>
-                <span className="s">{s.toSymbol}</span>
+            <span className="swap-row-ts">{timeAgo(swap.timestamp)}</span>
+            <span className={`swap-row-status is-${badge}`}>
+              <span className="d" aria-hidden="true" />
+              {badge.charAt(0).toUpperCase() + badge.slice(1)}
+            </span>
+            <span
+              className="swap-row-tx"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleCopyHash(swap) }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopyHash(swap) } }}
+              aria-label={`Copy hash ${hashDisplay}`}
+            >
+              <span className="hash">{hashDisplay}</span>
+              <span className="ext" aria-hidden="true">
+                <ExternalGlyph />
               </span>
             </span>
-          </span>
-          <span className="swap-row-ts">{s.timeAgo}</span>
-          <span className={`swap-row-status is-${s.status}`}>
-            <span className="d" aria-hidden="true" />
-            {s.status[0].toUpperCase() + s.status.slice(1)}
-          </span>
-          <span className="swap-row-tx">
-            <span className="hash">{s.txTruncated}</span>
-            <span className="ext" aria-hidden="true">
-              <ExternalGlyph />
-            </span>
-          </span>
-        </a>
-      ))}
+          </a>
+        )
+      })}
     </>
   )
 }
 
 function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
   const isConnected = wallet !== 'disconnected'
+  const [quoteOpen, setQuoteOpen] = useState(false)
+  const [orderOpen, setOrderOpen] = useState(false)
 
-  // Pass C will wire real address + debug info from the store.
-  // Until then, address and JSON fields show empty/no-data state.
-  const [quoteOpen, setQuoteOpen] = useState(!isConnected)
-  const [orderOpen, setOrderOpen] = useState(!isConnected)
+  const appId = useSwapStore((s) => s.appId)
+  const chainId = useSwapStore((s) => s.chainId)
+  const walletMode = useSwapStore((s) => s.walletMode)
+  const quote = useSwapStore((s) => s.quote)
+  const activeOrder = useSwapStore((s) => s.activeOrder)
+
+  // Active address: read individual fields for selector compatibility
+  const activeAddress = useSwapStore((s) => {
+    if (s.walletMode === 'managed' && s.managedWallet) return s.managedWallet.address
+    if (s.walletMode === 'bittensor' && s.bittensorAddress) return s.bittensorAddress
+    return s.walletAddress
+  })
+
+  const quoteJson = quote ? JSON.stringify(quote, null, 2) : null
+  const orderJson = activeOrder ? JSON.stringify(activeOrder, null, 2) : null
 
   return (
     <>
       <div className="debug-grid">
         <div className="debug-field">
           <span className="k">App&nbsp;ID</span>
-          <span className="v">—</span>
+          <span className="v">{appId || '—'}</span>
         </div>
         <div className="debug-field">
           <span className="k">Chain&nbsp;ID</span>
-          <span className="v">{wallet === 'bittensor' ? 'bittensor' : '—'}</span>
+          <span className="v">{chainId || '—'}</span>
         </div>
         <div className="debug-field">
           <span className="k">Wallet&nbsp;mode</span>
@@ -122,13 +203,13 @@ function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
             className={`v ${isConnected ? `is-${wallet}` : ''}`.trim()}
             style={!isConnected ? { color: 'var(--stone)' } : undefined}
           >
-            {wallet}
+            {walletMode}
           </span>
         </div>
         <div className="debug-field">
           <span className="k">Active&nbsp;address</span>
-          {isConnected ? (
-            <span className="v">—</span>
+          {activeAddress ? (
+            <span className="v">{activeAddress}</span>
           ) : (
             <span className="v is-empty">—</span>
           )}
@@ -141,9 +222,13 @@ function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
         open={quoteOpen}
         onToggle={() => setQuoteOpen((v) => !v)}
       >
-        <p className="app-rpanel-empty-line">
-          No data&nbsp;<span className="v">·&nbsp;—</span>
-        </p>
+        {quoteJson ? (
+          <pre>{quoteJson}</pre>
+        ) : (
+          <p className="app-rpanel-empty-line">
+            No data&nbsp;<span className="v">·&nbsp;—</span>
+          </p>
+        )}
       </Disclosure>
 
       <Disclosure
@@ -152,9 +237,13 @@ function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
         open={orderOpen}
         onToggle={() => setOrderOpen((v) => !v)}
       >
-        <p className="app-rpanel-empty-line">
-          No data&nbsp;<span className="v">·&nbsp;—</span>
-        </p>
+        {orderJson ? (
+          <pre>{orderJson}</pre>
+        ) : (
+          <p className="app-rpanel-empty-line">
+            No data&nbsp;<span className="v">·&nbsp;—</span>
+          </p>
+        )}
       </Disclosure>
     </>
   )
