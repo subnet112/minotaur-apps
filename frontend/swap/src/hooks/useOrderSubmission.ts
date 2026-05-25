@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef } from 'react'
-import { toast } from 'sonner'
+import { useToast } from '@/components/shell'
 import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
 import { formatAmount, shorten } from '../utils'
@@ -9,6 +9,7 @@ import * as api from '@/api/client'
  * Order submission hook: handles submit + ERC-20 approval + EIP-712 signing + polling.
  */
 export function useOrderSubmission() {
+  const toast = useToast()
   const store = useSwapStore()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -28,7 +29,14 @@ export function useOrderSubmission() {
           store.setPolling(false)
 
           if (status.status === 'filled') {
-            toast.success(`Swap filled! Score: ${status.score ?? 'N/A'}`)
+            // One-shot toast for terminal filled state (separate from submit flow).
+            // Use score as a proxy for surplus display — execution details may not
+            // be available yet (they're fetched from the tx receipt below).
+            const scoreStr = status.score != null ? `Score: ${status.score}` : undefined
+            toast.success({
+              title: 'Swap filled',
+              message: scoreStr,
+            })
             // Fetch execution details from tx receipt
             if (status.tx_hash && window.ethereum) {
               try {
@@ -51,12 +59,12 @@ export function useOrderSubmission() {
                       || store.quote?.ready_params?.min_output_amount
                       || '0'
                     ))
-                    const surplus = BigInt(amountOut) - minOutput
+                    const surplusWei = BigInt(amountOut) - minOutput
                     store.setExecutionDetails({
                       amountIn: amountIn.toString(),
                       amountOut: amountOut.toString(),
                       fee: fee.toString(),
-                      surplus: surplus > 0n ? surplus.toString() : '0',
+                      surplus: surplusWei > 0n ? surplusWei.toString() : '0',
                       tokenIn: tokenIn as string,
                       tokenOut: tokenOut as string,
                       gasUsed: receipt.gasUsed?.toString() || '0',
@@ -66,7 +74,8 @@ export function useOrderSubmission() {
               } catch (e) { console.warn('Failed to fetch execution details:', e) }
             }
           } else if (status.status === 'failed') {
-            toast.error('Swap execution failed')
+            // One-shot toast for terminal failed state (separate from submit flow)
+            toast.error({ title: 'Order failed', message: 'Swap execution failed' })
           }
         }
       } catch {
@@ -99,7 +108,7 @@ export function useOrderSubmission() {
         walletMode: store.walletMode,
       })
       store.setError(msg)
-      toast.error(msg)
+      toast.error({ title: 'Submit blocked', message: msg })
       return
     }
 
@@ -118,7 +127,8 @@ export function useOrderSubmission() {
 
       console.log('[swap] orderParams:', JSON.stringify(orderParams))
 
-      // Same-chain Bittensor: call the stake endpoint directly
+      // Same-chain Bittensor: call the stake endpoint directly (one-shot toasts,
+      // not sticky — this is a synchronous API response path, not a long wait).
       if (
         store.sourceChainId === BITTENSOR_CHAIN_ID &&
         store.chainId === BITTENSOR_CHAIN_ID &&
@@ -139,7 +149,9 @@ export function useOrderSubmission() {
             score: 1.0,
             tx_hash: stakeResult.tx_hash,
           } as any)
-          toast.success(`${orderParams.action === 'add_stake' ? 'Staked' : 'Unstaked'} successfully!`)
+          toast.success({
+            title: `${orderParams.action === 'add_stake' ? 'Staked' : 'Unstaked'} successfully!`,
+          })
           store.addToHistory({
             orderId: stakeResult.tx_hash || '',
             timestamp: Date.now(),
@@ -154,7 +166,7 @@ export function useOrderSubmission() {
           })
         } else {
           store.setError(stakeResult.error || 'Stake operation failed')
-          toast.error(stakeResult.error || 'Failed')
+          toast.error({ title: 'Stake failed', message: stakeResult.error || 'Failed' })
         }
         return
       }
@@ -194,18 +206,29 @@ export function useOrderSubmission() {
         }
       }
 
+      // Sticky-loading-update: submit flow.
+      // Capture id here — all downstream transitions (signing, success, error)
+      // call toast.update(id, ...) exactly once at their terminal point.
+      const submitId = toast.loading({ title: 'Submitting order…' })
+
       // Step 1: Submit order to get the server-assigned order_id
       const orderChainId = store.isCrossChain ? store.sourceChainId : store.chainId
 
-      const order = await api.submitOrder(
-        store.appId,
-        orderParams,
-        addr,
-        {
-          intentFunction: store.quote?.intent_function || 'swap',
-          chainId: orderChainId,
-        },
-      )
+      let order: any
+      try {
+        order = await api.submitOrder(
+          store.appId,
+          orderParams,
+          addr,
+          {
+            intentFunction: store.quote?.intent_function || 'swap',
+            chainId: orderChainId,
+          },
+        )
+      } catch (submitErr: any) {
+        toast.update(submitId, { variant: 'error', title: 'Submit failed', message: submitErr?.message })
+        throw submitErr
+      }
 
       // Step 2: EIP-712 user signature for external wallets (MetaMask)
       if (store.walletMode === 'external' && window.ethereum && store.contractAddress && order.order_id) {
@@ -267,14 +290,19 @@ export function useOrderSubmission() {
             cooldown: 0,
           }
 
-          toast.info('Please sign the swap order in MetaMask...')
+          // Update the sticky loading toast to prompt the user — keep variant
+          // 'loading' so the toast stays pinned while the wallet popup is open.
+          toast.update(submitId, { variant: 'loading', title: 'Please sign the swap order in MetaMask…' })
           const userSignature = await signer.signTypedData(domain, types, value)
 
           // Step 3: Attach signature via the API client (honours VITE_API_URL).
           // A hardcoded relative fetch here used to silently 404 in production
           // because CloudFront doesn't proxy /api/* to the backend.
           await api.attachSignature(order.order_id, userSignature)
-          toast.success('Order signed!')
+          // Signature attached — update back to generic "submitting" while the
+          // relayer picks up the order. The success transition happens below
+          // once store.setActiveOrder is called.
+          toast.update(submitId, { variant: 'loading', title: 'Order signed, waiting for relayer…' })
         } catch (sigErr: any) {
           if (sigErr?.code === 'ACTION_REJECTED' || sigErr?.code === 4001) {
             // For EVM external-wallet swaps the signature is mandatory —
@@ -282,7 +310,7 @@ export function useOrderSubmission() {
             // instead of shipping an unsigned order.
             const msg = 'Signature rejected — order cancelled'
             store.setError(msg)
-            toast.error(msg)
+            toast.update(submitId, { variant: 'error', title: 'Signature rejected', message: 'Order cancelled' })
             store.setSubmitting(false)
             return
           }
@@ -290,14 +318,15 @@ export function useOrderSubmission() {
           console.error('EIP-712 signing/attach failed:', sigErr)
           const msg = 'Failed to attach signature: ' + (sigErr?.message || String(sigErr))
           store.setError(msg)
-          toast.error(msg)
+          toast.update(submitId, { variant: 'error', title: 'Signing failed', message: sigErr?.message || String(sigErr) })
           store.setSubmitting(false)
           return
         }
       }
 
       store.setActiveOrder(order)
-      toast.success(`Order submitted: ${shorten(order.order_id, 6)}`)
+      // Terminal success transition for the submit loading toast
+      toast.update(submitId, { variant: 'success', title: 'Order open', message: `#${shorten(order.order_id, 6)}` })
 
       // Add to history
       store.addToHistory({
@@ -318,21 +347,23 @@ export function useOrderSubmission() {
       // attach msg.value. The contract wraps it to WETH atomically inside
       // _fundAndExecute, so this ends up as a single MetaMask popup.
       if (isNativeInput) {
+        // Sticky-loading-update for the direct-TX phase: new loading toast
+        // since the submit loading toast has already resolved to success above.
+        const txId = toast.loading({ title: 'Waiting for validator consensus…' })
         try {
-          toast.info('Waiting for validator consensus...')
           const prepared = await api.prepareDirectSubmit(order.order_id)
 
           const { ethers } = await import('ethers')
           const provider = new ethers.BrowserProvider(window.ethereum!)
           const signer = await provider.getSigner()
 
-          toast.info('Submit the swap transaction in MetaMask...')
+          toast.update(txId, { variant: 'loading', title: 'Submit the swap transaction in MetaMask…' })
           const tx = await signer.sendTransaction({
             to: prepared.contract_address,
             data: prepared.calldata,
             value: BigInt(prepared.value),
           })
-          toast.success(`TX sent: ${shorten(tx.hash, 6)}`)
+          toast.update(txId, { variant: 'success', title: `TX sent: ${shorten(tx.hash, 6)}` })
           // Wait for the receipt, then finalize the order on the API.
           // The API doesn't watch IntentExecuted events on its own, so the
           // frontend is responsible for closing the loop for user-direct TXs.
@@ -345,11 +376,11 @@ export function useOrderSubmission() {
         } catch (txErr: any) {
           if (txErr?.code === 'ACTION_REJECTED' || txErr?.code === 4001) {
             store.setError('Transaction rejected')
-            toast.error('Transaction rejected')
+            toast.update(txId, { variant: 'error', title: 'Transaction rejected' })
           } else {
             console.error('Direct-submit TX failed:', txErr)
             store.setError(txErr?.message || 'Direct submission failed')
-            toast.error('Direct submission failed')
+            toast.update(txId, { variant: 'error', title: 'Direct submission failed', message: txErr?.message })
           }
         }
       } else {
@@ -358,7 +389,10 @@ export function useOrderSubmission() {
       }
     } catch (e) {
       store.setError((e as Error).message)
-      toast.error('Swap failed')
+      // Only reached for errors not already handled in the submit/signing
+      // sub-blocks (e.g. orderParams setup, cross-chain logic). Fire a
+      // one-shot error since there may be no loading toast in scope.
+      toast.error({ title: 'Swap failed', message: (e as Error).message })
     } finally {
       store.setSubmitting(false)
     }

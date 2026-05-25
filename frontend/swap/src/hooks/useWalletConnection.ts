@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react'
-import { toast } from 'sonner'
+import { useToast } from '@/components/shell'
 import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
 import { shorten } from '../utils'
@@ -69,6 +69,7 @@ export function useMetaMaskListener() {
  * Wallet connection actions: MetaMask, managed wallet, Bittensor.
  */
 export function useWalletConnection() {
+  const toast = useToast()
   const store = useSwapStore()
   const hasMetaMask = typeof window !== 'undefined' && !!window.ethereum
 
@@ -88,30 +89,37 @@ export function useWalletConnection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasMetaMask])
 
+  // Sticky-loading-update: createManagedWallet fires a loading toast and
+  // transitions it to success or error. One toast.update per id.
   const createManagedWallet = useCallback(async () => {
+    const id = toast.loading({ title: 'Creating managed wallet…' })
     try {
       store.setLoading(true)
       const wallet = await api.createWallet([store.chainId])
       store.setManagedWallet(wallet)
       store.setWalletConnected(true)
-      toast.success(`Wallet created: ${shorten(wallet.address)}`)
+      toast.update(id, { variant: 'success', title: `Wallet created: ${shorten(wallet.address)}` })
     } catch (e) {
       store.setError((e as Error).message)
-      toast.error('Failed to create wallet')
+      toast.update(id, { variant: 'error', title: 'Failed to create wallet', message: (e as Error).message })
     } finally {
       store.setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.chainId])
 
+  // Sticky-loading-update: fundManagedWallet fires a loading toast and
+  // transitions it to success or error. Balance refresh happens inside the
+  // same try block — if it throws the error branch handles it.
   const fundManagedWallet = useCallback(async () => {
     const wallet = store.managedWallet
     if (!wallet) return
+    const id = toast.loading({ title: 'Funding wallet…' })
     try {
       store.setLoading(true)
       await api.faucetEth(wallet.address, 10, store.chainId)
       await api.faucetErc20('USDC', wallet.address, '10000000000', store.chainId) // 10k USDC
-      toast.success('Wallet funded with 10 ETH + 10k USDC')
+      toast.update(id, { variant: 'success', title: 'Wallet funded with 10 ETH + 10k USDC' })
       // Refresh balances
       const res: any = await api.getWalletBalances(wallet.address, store.chainId)
       const ethBal = res.native?.balance_wei || res.eth_balance || '0'
@@ -129,13 +137,15 @@ export function useWalletConnection() {
       store.setOutputBalance(getBalance(store.outputToken))
     } catch (e) {
       store.setError((e as Error).message)
-      toast.error('Faucet failed')
+      toast.update(id, { variant: 'error', title: 'Faucet failed', message: (e as Error).message })
     } finally {
       store.setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.managedWallet, store.chainId])
 
+  // connectBittensorWallet: one-shot success/error toasts (not sticky — each
+  // early-exit path is independent, no single async flow to wrap).
   const connectBittensorWallet = useCallback(async () => {
     try {
       store.setLoading(true)
@@ -146,7 +156,7 @@ export function useWalletConnection() {
       const extensions = injectedWindow.injectedWeb3
 
       if (!extensions || Object.keys(extensions).length === 0) {
-        toast.error('No Bittensor wallet found. Install Polkadot.js, Talisman, or SubWallet extension.')
+        toast.error({ title: 'No Bittensor wallet found. Install Polkadot.js, Talisman, or SubWallet extension.' })
         return
       }
 
@@ -156,13 +166,13 @@ export function useWalletConnection() {
       const enabled = await extension.enable('Minotaur')
 
       if (!enabled || !enabled.accounts) {
-        toast.error('Wallet connection rejected')
+        toast.error({ title: 'Wallet connection rejected' })
         return
       }
 
       const accounts = await enabled.accounts.get()
       if (!accounts || accounts.length === 0) {
-        toast.error('No Bittensor accounts found in wallet')
+        toast.error({ title: 'No Bittensor accounts found in wallet' })
         return
       }
 
@@ -172,7 +182,7 @@ export function useWalletConnection() {
       store.setBittensorConnected(true)
       // Auto-set Bittensor as source chain for cross-chain swaps
       store.setSourceChainId(BITTENSOR_CHAIN_ID)
-      toast.success(`Connected: ${shorten(account.address, 8)} (${extensionName})`)
+      toast.success({ title: `Connected: ${shorten(account.address, 8)} (${extensionName})` })
 
       // Check if proxy is already set up via API
       try {
@@ -182,7 +192,7 @@ export function useWalletConnection() {
           const permissions = data.permissions || []
           if (permissions.some((p: any) => p.status === 'active')) {
             store.setBittensorProxySetup(true)
-            toast.success('Proxy delegation already active')
+            toast.success({ title: 'Proxy delegation already active' })
           }
         }
       } catch {
@@ -190,15 +200,20 @@ export function useWalletConnection() {
       }
     } catch (e) {
       console.error('Bittensor wallet connect error:', e)
-      toast.error(`Connection failed: ${(e as Error).message}`)
+      toast.error({ title: 'Connection failed', message: (e as Error).message })
     } finally {
       store.setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Sticky-loading-update: setupBittensorProxy uses a single loading toast
+  // throughout the multi-step flow. Mid-flow progress is communicated by
+  // updating the loading toast title (keeping variant: 'loading'). The final
+  // transition lands on success or error. One id — one terminal update.
   const setupBittensorProxy = useCallback(async () => {
     if (!store.bittensorAddress) return
+    const id = toast.loading({ title: 'Setting up Bittensor proxy…' })
     try {
       store.setLoading(true)
       store.setError(null)
@@ -209,7 +224,7 @@ export function useWalletConnection() {
       const delegateHotkey = health.validator_hotkey || health.hotkey || health.solver_round_metagraph?.leader_hotkey || ''
 
       if (!delegateHotkey) {
-        toast.error('Could not determine Minotaur delegate hotkey')
+        toast.update(id, { variant: 'error', title: 'Could not determine Minotaur delegate hotkey' })
         return
       }
 
@@ -224,7 +239,9 @@ export function useWalletConnection() {
         throw new Error('Wallet signer not available')
       }
 
-      toast.info('Please approve the proxy delegation in your wallet...')
+      // Inform user they need to approve in their wallet — keep toast sticky
+      // (loading variant) while waiting for the wallet popup.
+      toast.update(id, { variant: 'loading', title: 'Please approve the proxy delegation in your wallet…' })
 
       // Connect to the local subtensor and submit proxy.addProxy
       const { ApiPromise, WsProvider } = await import('@polkadot/api')
@@ -257,7 +274,9 @@ export function useWalletConnection() {
           )
         })
 
-        toast.success('On-chain proxy delegation confirmed!')
+        // On-chain confirmed — still more work to do (permission registration),
+        // so keep the toast loading with an updated title rather than resolving.
+        toast.update(id, { variant: 'loading', title: 'On-chain confirmed, registering permission…' })
       } finally {
         await polkadotApi.disconnect()
       }
@@ -286,11 +305,11 @@ export function useWalletConnection() {
       }
 
       store.setBittensorProxySetup(true)
-      toast.success(`Proxy delegation active for delegate ${shorten(delegateHotkey, 8)}`)
+      toast.update(id, { variant: 'success', title: `Proxy delegation active for delegate ${shorten(delegateHotkey, 8)}` })
 
     } catch (e) {
       console.error('Proxy setup error:', e)
-      toast.error(`Proxy setup failed: ${(e as Error).message}`)
+      toast.update(id, { variant: 'error', title: 'Proxy setup failed', message: (e as Error).message })
     } finally {
       store.setLoading(false)
     }
