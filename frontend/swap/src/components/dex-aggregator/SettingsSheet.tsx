@@ -6,14 +6,16 @@
  * In managed-wallet mode the toggles hide (designer's call — neither
  * is meaningful without an external EVM signer).
  *
- * Visual-only. State lives in component-local useState so the controls
- * actually move. None of it persists — the prototype is for layout
- * review only.
+ * State is persisted via Zustand store — closing the sheet preserves
+ * all settings. Slippage, App ID, wallet mode, and unlimited approval
+ * are all live-synced with the store.
  *
  * Lifted markup mirrors components.html section 00.30 (line 11134 +).
  */
 import { useEffect, useState } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
+import { useSwapStore } from '@/store'
+import { useToast } from '@/components/shell'
 import type { DesignWalletMode } from '@/types'
 
 interface SettingsSheetProps {
@@ -24,11 +26,35 @@ interface SettingsSheetProps {
 const PRESETS = [0.5, 1, 2, 5] as const
 
 export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
-  const [slippage, setSlippage] = useState(1)
+  // Read from store
+  const slippageBps = useSwapStore((s) => s.slippageBps)
+  const storeAppId = useSwapStore((s) => s.appId)
+  const unlimitedApproval = useSwapStore((s) => s.unlimitedApproval)
+  const walletMode = useSwapStore((s) => s.walletMode)
+
+  // Actions
+  const setSlippageBps = useSwapStore((s) => s.setSlippageBps)
+  const setAppId = useSwapStore((s) => s.setAppId)
+  const setUnlimitedApproval = useSwapStore((s) => s.setUnlimitedApproval)
+  const setWalletMode = useSwapStore((s) => s.setWalletMode)
+
+  const toast = useToast()
+
+  // Local custom input state (controlled string for the text field)
   const [customSlippage, setCustomSlippage] = useState('')
-  const [appId, setAppId] = useState('app_4f3b9c2a8d1e')
-  const [signWithExternal, setSignWithExternal] = useState(wallet === 'metamask' || wallet === 'bittensor')
-  const [unlimitedApproval, setUnlimitedApproval] = useState(false)
+
+  // Derived values
+  const slippagePct = slippageBps / 100 // e.g. 100 bps → 1.00
+  const isHighSlip = slippageBps > 500  // > 5%
+
+  // Visual: map 10–5000 bps → 0–100% for slider fill/thumb
+  // Ceiling at 5000 bps (50%) = 100% visual
+  const slippageFillPct = Math.min(((slippageBps - 10) / (5000 - 10)) * 100, 100)
+
+  const signWithExternal = walletMode === 'external'
+
+  // Managed-only mode hides external toggles (matches v3 in the prototype)
+  const showExternalToggles = wallet !== 'managed'
 
   // Esc dismisses.
   useEffect(() => {
@@ -39,12 +65,32 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  const isHighSlip = slippage > 5
-  const slippagePct = `${slippage.toFixed(2)} %`
-  const slippageFillPct = Math.min((slippage / 12.5) * 100, 100) // visual ceiling at 12.5% for the bar
+  function handlePresetClick(preset: number) {
+    const bps = Math.round(preset * 100)
+    setSlippageBps(bps)
+    setCustomSlippage('')
+  }
 
-  // Managed-only mode hides external toggles (matches v3 in the prototype).
-  const showExternalToggles = wallet !== 'managed'
+  function handleCustomChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value
+    setCustomSlippage(raw)
+    const parsed = parseFloat(raw)
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      const bps = Math.round(parsed * 100)
+      // Clamp to [10, 5000]
+      setSlippageBps(Math.max(10, Math.min(5000, bps)))
+    }
+  }
+
+  // Which preset (if any) is exactly selected; custom input clears selection
+  function isPresetSelected(preset: number) {
+    return slippageBps === Math.round(preset * 100) && customSlippage === ''
+  }
+
+  function handleDone() {
+    toast.success({ title: 'Settings saved' })
+    onClose()
+  }
 
   return (
     <ModalBackdrop onClose={onClose}>
@@ -68,7 +114,7 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
             <div className="sw-settings-h">
               <span className="lbl">Slippage tolerance</span>
               <span className="v" style={isHighSlip ? { color: 'var(--cretan)' } : undefined}>
-                {slippagePct}
+                {slippagePct.toFixed(2)} %
               </span>
             </div>
             <div className="sw-slider">
@@ -87,18 +133,37 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
                     ...(isHighSlip ? { borderColor: 'var(--cretan)' } : undefined),
                   }}
                 />
+                {/* Invisible range input overlays the track for accessible drag interaction */}
+                <input
+                  type="range"
+                  min="10"
+                  max="5000"
+                  step="1"
+                  value={slippageBps}
+                  onChange={(e) => {
+                    setSlippageBps(Number(e.target.value))
+                    setCustomSlippage('')
+                  }}
+                  aria-label="Slippage tolerance"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    opacity: 0,
+                    cursor: 'pointer',
+                    width: '100%',
+                    height: '100%',
+                    margin: 0,
+                  }}
+                />
               </div>
             </div>
             <div className="sw-settings-presets">
               {PRESETS.map((preset) => (
                 <button
                   key={preset}
-                  className={`sw-preset ${slippage === preset && !customSlippage ? 'is-selected' : ''}`.trim()}
+                  className={`sw-preset ${isPresetSelected(preset) ? 'is-selected' : ''}`.trim()}
                   type="button"
-                  onClick={() => {
-                    setSlippage(preset)
-                    setCustomSlippage('')
-                  }}
+                  onClick={() => handlePresetClick(preset)}
                 >
                   {preset} %
                 </button>
@@ -107,12 +172,7 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
                 <input
                   type="text"
                   value={customSlippage}
-                  onChange={(e) => {
-                    const raw = e.target.value
-                    setCustomSlippage(raw)
-                    const parsed = parseFloat(raw)
-                    if (!Number.isNaN(parsed)) setSlippage(parsed)
-                  }}
+                  onChange={handleCustomChange}
                   placeholder="Custom"
                   style={isHighSlip ? { color: 'var(--cretan)' } : undefined}
                 />
@@ -142,7 +202,7 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
               <input
                 type="text"
                 placeholder="app_xxxxxxxxxxxx"
-                value={appId}
+                value={storeAppId}
                 onChange={(e) => setAppId(e.target.value)}
               />
             </div>
@@ -157,7 +217,7 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
                 <button
                   className={`sw-toggle ${signWithExternal ? 'is-on' : ''}`.trim()}
                   type="button"
-                  onClick={() => setSignWithExternal((v) => !v)}
+                  onClick={() => setWalletMode(signWithExternal ? 'managed' : 'external')}
                 >
                   <div className="name">Sign with external wallet</div>
                   <div className="sw" role="switch" aria-checked={signWithExternal}>
@@ -174,7 +234,7 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
                 <button
                   className={`sw-toggle ${unlimitedApproval ? 'is-on' : ''}`.trim()}
                   type="button"
-                  onClick={() => setUnlimitedApproval((v) => !v)}
+                  onClick={() => setUnlimitedApproval(!unlimitedApproval)}
                 >
                   <div className="name">Unlimited approval</div>
                   <div className="sw" role="switch" aria-checked={unlimitedApproval}>
@@ -191,7 +251,7 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
         </div>
 
         <div className="sw-settings-footer">
-          <button className="sw-settings-done" type="button" onClick={onClose}>
+          <button className="sw-settings-done" type="button" onClick={handleDone}>
             Done
           </button>
         </div>
