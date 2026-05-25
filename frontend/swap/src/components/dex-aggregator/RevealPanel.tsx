@@ -35,6 +35,7 @@ export default function RevealPanel({ role, wallet, onClose }: RevealPanelProps)
           {role === 'history' && <HistoryCount />}
         </span>
         <span className="ln" aria-hidden="true" />
+        {role === 'history' && <ClearHistoryButton />}
         <button className="x" type="button" aria-label="Close panel" onClick={onClose}>
           <DismissGlyph />
         </button>
@@ -44,6 +45,30 @@ export default function RevealPanel({ role, wallet, onClose }: RevealPanelProps)
         {role === 'history' ? <HistoryBody /> : <DebugBody wallet={wallet} />}
       </div>
     </section>
+  )
+}
+
+/** Clear all history button — only renders when recentSwaps is non-empty. */
+function ClearHistoryButton() {
+  const count = useSwapStore((s) => s.recentSwaps.length)
+  const toast = useToast()
+
+  if (count === 0) return null
+
+  function handleClear() {
+    useSwapStore.getState().clearHistory()
+    toast.transient({ title: 'History cleared' })
+  }
+
+  return (
+    <button
+      className="app-rpanel-clear"
+      type="button"
+      aria-label="Clear swap history"
+      onClick={handleClear}
+    >
+      Clear
+    </button>
   )
 }
 

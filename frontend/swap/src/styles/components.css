@@ -5807,6 +5807,25 @@
 }
 .app-rpanel-head .x:hover { color: var(--bone); }
 
+/* Clear history button — small ghost chip, sits left of the dismiss X */
+.app-rpanel-clear {
+  padding: 3px 9px;
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--stone);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: color 120ms var(--ease), border-color 120ms var(--ease);
+}
+.app-rpanel-clear:hover {
+  color: var(--cretan);
+  border-color: rgba(220, 91, 29, 0.5);
+}
+
 .app-rpanel-body { padding: 0; }
 
 /* empty state — centered copy */
