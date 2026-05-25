@@ -26,6 +26,12 @@ interface WalletButtonProps {
   address?: string
 }
 
+/** Truncate an address to first 6 + ellipsis + last 4 chars. */
+function truncateAddress(addr: string): string {
+  if (!addr || addr.length <= 8) return addr
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
+}
+
 export default function WalletButton({ mode, onClick, address = '' }: WalletButtonProps) {
   if (mode === 'disconnected') {
     return (
@@ -64,7 +70,7 @@ export default function WalletButton({ mode, onClick, address = '' }: WalletButt
         <span className="d" aria-hidden="true" />
         {modeLabel}
       </span>
-      <span className="app-wallet-addr">{address}</span>
+      <span className="app-wallet-addr">{truncateAddress(address)}</span>
       <span className="chev" aria-hidden="true" />
     </button>
   )

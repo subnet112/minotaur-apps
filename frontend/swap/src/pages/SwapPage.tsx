@@ -132,6 +132,13 @@ export default function SwapPage() {
     ? modeBlockRaw as Exclude<ModeBlock, 'none'>
     : null
 
+  // Active address — derived from wallet mode + individual address fields
+  const activeAddress = useSwapStore((s) => {
+    if (s.walletMode === 'managed' && s.managedWallet) return s.managedWallet.address
+    if (s.walletMode === 'bittensor' && s.bittensorAddress) return s.bittensorAddress
+    return s.walletAddress
+  })
+
   // Map store wallet mode (3 values + bool) into design's 4-value union
   const designWallet =
     !walletConnected
@@ -194,6 +201,7 @@ export default function SwapPage() {
           <>
             <WalletButton
               mode={designWallet}
+              address={activeAddress}
               onClick={() => {
                 if (!walletConnected) {
                   wallet.connectExternalWallet?.()
