@@ -17,7 +17,8 @@ import {
   mapStoreToSwapFormProps,
   mapQuoteResultToQuoteCardProps,
 } from './SwapPage.mappers'
-import type { Token, TokenDisplay } from '@/types'
+import type { Token, TokenDisplay, OrderStep } from '@/types'
+import { CHAIN_CONFIG } from '@/config/chains'
 
 import { useAppBootstrap } from '@/hooks/useAppBootstrap'
 import { useDevPreviewState } from '@/hooks/useDevPreviewState'
@@ -101,6 +102,7 @@ export default function SwapPage() {
   const quote = useSwapStore((s) => s.quote)
   const quoteExpiry = useSwapStore((s) => s.quoteExpiry)
   const activeOrder = useSwapStore((s) => s.activeOrder)
+  const executionDetails = useSwapStore((s) => s.executionDetails)
   const showHistory = useSwapStore((s) => s.showHistory)
   const showDebug = useSwapStore((s) => s.showDebug)
   const tokenSelectorOpen = useSwapStore((s) => s.tokenSelectorOpen)
@@ -266,8 +268,15 @@ export default function SwapPage() {
 
           {activeOrder && (
             <OrderStatusCard
-              step={activeOrder.status as import('@/types').OrderStep}
-              autoAdvance={false}
+              step={activeOrder.status as OrderStep}
+              orderId={activeOrder.order_id}
+              txHash={activeOrder.tx_hash ?? undefined}
+              score={activeOrder.score ?? undefined}
+              output={executionDetails?.amountOut}
+              surplus={executionDetails?.surplus}
+              fee={executionDetails?.fee}
+              gas={executionDetails?.gasUsed}
+              explorerBaseUrl={CHAIN_CONFIG[chainId]?.explorer ?? ''}
               onNewSwap={() => {
                 useSwapStore.getState().setActiveOrder(null)
                 useSwapStore.getState().setInputAmount('')

@@ -2,17 +2,18 @@
  * OrderStatusCard — 00.29 Order status card.
  *
  * 6-state stepper across the top + 2-column detail grid + terminal
- * actions. When `autoAdvance` is true (default), the stepper marches
- * forward one node every ~2s for demo. When the parent passes an
- * explicit `step`, that wins and disables auto-advance.
+ * actions. Driven entirely by real store data:
+ *   - step from activeOrder.status
+ *   - orderId, txHash, score from activeOrder
+ *   - output, surplus, fee, gas from executionDetails
  *
  * The lime fill segment under the rail extends from the first node to
  * the current node, drawing visual progress.
  *
  * Lifted markup mirrors components.html section 00.29 (line 10805 +).
  */
-import { useEffect, useState } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
+import { useToast } from '@/components/shell'
 import type { OrderStep } from '@/types'
 
 const STEPS: ReadonlyArray<Exclude<OrderStep, 'failed'>> = [
@@ -33,37 +34,48 @@ const STEP_LABELS: Record<Exclude<OrderStep, 'failed'>, string> = {
   filled: 'Filled',
 }
 
-interface OrderStatusCardProps {
-  /** Pin the current step (also disables auto-advance). */
-  step?: OrderStep
-  /** Demo mode: advances one node every ~2 s. Default true when step omitted. */
-  autoAdvance?: boolean
+export interface OrderStatusCardProps {
+  /** Current step from store.activeOrder.status */
+  step: OrderStep
+  /** store.activeOrder.order_id */
+  orderId: string
+  /** store.activeOrder.tx_hash */
+  txHash?: string
+  /** store.activeOrder.score */
+  score?: number
+  /** store.executionDetails.amountOut (formatted string) */
+  output?: string
+  /** store.executionDetails.surplus (formatted string) */
+  surplus?: string
+  /** store.executionDetails.fee (formatted string) */
+  fee?: string
+  /** store.executionDetails.gasUsed (formatted string) */
+  gas?: string
+  /** CHAIN_CONFIG[chainId].explorer */
+  explorerBaseUrl?: string
   onNewSwap: () => void
 }
 
-export default function OrderStatusCard({ step, autoAdvance = true, onNewSwap }: OrderStatusCardProps) {
-  // If the parent pinned a step, that's the source of truth. Otherwise
-  // we drive our own counter and bump it every ~2 s.
+export default function OrderStatusCard({
+  step,
+  orderId,
+  txHash,
+  score,
+  output,
+  surplus,
+  fee,
+  gas,
+  explorerBaseUrl = '',
+  onNewSwap,
+}: OrderStatusCardProps) {
+  const toast = useToast()
   const isFailed = step === 'failed'
-  const initial = step && step !== 'failed' ? STEPS.indexOf(step) : 0
-  const [currentIdx, setCurrentIdx] = useState(initial)
 
-  useEffect(() => {
-    if (step && step !== 'failed') {
-      setCurrentIdx(STEPS.indexOf(step))
-    }
-  }, [step])
+  // Map step → index into STEPS array
+  // For 'failed', treat as if stopped at 'open' (idx 1) per prototype v4
+  const currentIdx = isFailed ? 1 : STEPS.indexOf(step as Exclude<OrderStep, 'failed'>)
 
-  useEffect(() => {
-    if (step) return // pinned
-    if (!autoAdvance) return
-    const id = window.setInterval(() => {
-      setCurrentIdx((i) => Math.min(i + 1, STEPS.length - 1))
-    }, 2000)
-    return () => window.clearInterval(id)
-  }, [step, autoAdvance])
-
-  const isTerminal = isFailed || (step === 'filled' || (!step && currentIdx >= STEPS.length - 1))
+  const isTerminal = step === 'filled' || step === 'failed'
 
   // Lime segment geometry. The 6 nodes sit at evenly-spaced positions
   // (12 columns, each node at 1/12 + idx*2/12 = 8.33% + idx*16.66%).
@@ -72,13 +84,28 @@ export default function OrderStatusCard({ step, autoAdvance = true, onNewSwap }:
   const segStartPct = 8.33
   const segWidthPct = currentIdx === 0 ? 0 : currentIdx * 16.66
 
-  // Detail rows that resolve as the order progresses.
+  // Visibility gates — items reveal as the order progresses
   const showTxHash = currentIdx >= 1 || isFailed
-  const showScore = currentIdx >= 3
-  const showOutput = currentIdx >= 4
-  const showSurplus = currentIdx >= 5
-  const showFee = currentIdx >= 4
-  const showGas = currentIdx >= 4
+  const showScore = score != null && currentIdx >= 3
+  const showOutput = output != null && currentIdx >= 4
+  const showSurplus = surplus != null && currentIdx >= 5
+  const showFee = fee != null && currentIdx >= 4
+  const showGas = gas != null && currentIdx >= 4
+
+  // Short display of order ID for the header (#xxxxx)
+  const orderIdShort = orderId ? `#${orderId.slice(0, 5)}` : '#—'
+
+  function handleCopyOrderId() {
+    if (!orderId) return
+    navigator.clipboard.writeText(orderId).then(() => {
+      toast.transient({ title: 'Order ID copied' })
+    }).catch(() => {
+      toast.error({ title: 'Copy failed' })
+    })
+  }
+
+  const txHref = txHash && explorerBaseUrl ? `${explorerBaseUrl}/tx/${txHash}` : undefined
+  const txDisplay = txHash ? `${txHash.slice(0, 6)}…${txHash.slice(-4)}` : null
 
   return (
     <section className={`sw-status sw-card ${isFailed ? 'is-failed' : ''}`.trim()}>
@@ -91,8 +118,17 @@ export default function OrderStatusCard({ step, autoAdvance = true, onNewSwap }:
         </span>
         <span className="ln" aria-hidden="true" />
         <span className="r">
-          #abc12
-          {isTerminal && !isFailed && <span className="v">&nbsp;·&nbsp;0:08 total</span>}
+          <button
+            type="button"
+            className="copy"
+            onClick={handleCopyOrderId}
+            aria-label="Copy order ID"
+            title="Copy full order ID"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            {orderIdShort}
+          </button>
+          {isTerminal && !isFailed && <span className="v">&nbsp;·&nbsp;filled</span>}
         </span>
       </div>
 
@@ -125,48 +161,72 @@ export default function OrderStatusCard({ step, autoAdvance = true, onNewSwap }:
         <div className="sw-status-rows">
           <div className="row">
             <span className="k">Tx hash</span>
-            <span className={`v ${showTxHash ? '' : 'dim'}`.trim()}>
-              {showTxHash ? (
-                <span className="copy">
-                  0x9a3f…e21c{' '}
-                  <span className="ext" aria-hidden="true">
-                    <ExternalGlyph />
-                  </span>
-                </span>
+            <span className={`v ${showTxHash && txDisplay ? '' : 'dim'}`.trim()}>
+              {showTxHash && txDisplay ? (
+                txHref ? (
+                  <a className="copy" href={txHref} target="_blank" rel="noopener noreferrer">
+                    {txDisplay}{' '}
+                    <span className="ext" aria-hidden="true">
+                      <ExternalGlyph />
+                    </span>
+                  </a>
+                ) : (
+                  <span className="copy">{txDisplay}</span>
+                )
               ) : (
-                '— pending'
+                showTxHash ? '—' : '— pending'
               )}
             </span>
           </div>
           <div className="row">
             <span className="k">Score</span>
-            <span className={`v ${showScore ? '' : 'dim'}`.trim()}>{showScore ? '0.984' : '—'}</span>
+            <span className={`v ${showScore ? '' : 'dim'}`.trim()}>
+              {showScore && score != null ? score.toFixed(4) : '—'}
+            </span>
           </div>
           <div className="row">
             <span className="k">Output</span>
-            <span className={`v ${showOutput ? '' : 'dim'}`.trim()}>{showOutput ? '0.3151 ETH' : '—'}</span>
+            <span className={`v ${showOutput ? '' : 'dim'}`.trim()}>
+              {showOutput && output ? output : '—'}
+            </span>
           </div>
           <div className="row">
             <span className="k">Surplus</span>
             <span className={`v ${showSurplus ? 'lime' : 'dim'}`.trim()}>
-              {showSurplus ? '+0.0057 · $18.20' : '—'}
+              {showSurplus && surplus ? `+${surplus}` : '—'}
             </span>
           </div>
           <div className="row">
             <span className="k">Fee</span>
-            <span className={`v ${showFee ? '' : 'dim'}`.trim()}>{showFee ? '$ 0.40' : '—'}</span>
+            <span className={`v ${showFee ? '' : 'dim'}`.trim()}>
+              {showFee && fee ? fee : '—'}
+            </span>
           </div>
           <div className="row">
             <span className="k">Gas</span>
-            <span className={`v ${showGas ? '' : 'dim'}`.trim()}>{showGas ? '$ 2.18' : '—'}</span>
+            <span className={`v ${showGas ? '' : 'dim'}`.trim()}>
+              {showGas && gas ? gas : '—'}
+            </span>
           </div>
         </div>
 
         {isTerminal && (
           <div className="sw-status-actions">
-            <button className="a-ghost" type="button">
-              View on explorer&nbsp;<span style={{ fontSize: '10px' }}>↗</span>
-            </button>
+            {txHref && (
+              <a
+                className="a-ghost"
+                href={txHref}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View on explorer&nbsp;<span style={{ fontSize: '10px' }}>↗</span>
+              </a>
+            )}
+            {!txHref && (
+              <button className="a-ghost" type="button" disabled>
+                View on explorer&nbsp;<span style={{ fontSize: '10px' }}>↗</span>
+              </button>
+            )}
             <button className="a-primary" type="button" onClick={onNewSwap}>
               New swap&nbsp;<span style={{ fontSize: '10px' }}>→</span>
             </button>
