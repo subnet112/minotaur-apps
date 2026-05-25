@@ -17,8 +17,7 @@
  */
 import { useId } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
-import type { ActionState, DesignWalletMode } from '@/types'
-import type { MockToken } from '@/types'
+import type { ActionState, DesignWalletMode, TokenDisplay } from '@/types'
 import ActionButton from './ActionButton'
 
 interface SwapFormProps {
@@ -35,8 +34,8 @@ interface SwapFormProps {
   toChainIconClass?: string
 
   /** Token selector triggers. */
-  fromToken: MockToken
-  toToken: MockToken
+  fromToken: TokenDisplay
+  toToken: TokenDisplay
 
   /** Amount inputs. `toAmount` is read-only and shows `LOADING…` when fetching. */
   fromAmount: string

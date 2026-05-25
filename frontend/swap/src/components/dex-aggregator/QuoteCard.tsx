@@ -13,14 +13,14 @@
  */
 import { useEffect, useState } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
-import { MOCK_QUOTE_USDC_TO_ETH, type MockQuote } from '@/types'
+import type { QuoteDisplay } from '@/types'
 
 interface QuoteCardProps {
-  /** Override the default quote (useful for direction-swap preview). */
-  quote?: MockQuote
+  /** Real quote from the store, mapped via SwapPage.mappers. */
+  quote: QuoteDisplay
 }
 
-export default function QuoteCard({ quote = MOCK_QUOTE_USDC_TO_ETH }: QuoteCardProps) {
+export default function QuoteCard({ quote }: QuoteCardProps) {
   // TTL ticks down once per second. On zero we reset to `ttlSeconds`
   // to demo the "refetch" feel without doing an actual network call.
   const [secondsLeft, setSecondsLeft] = useState(quote.ttlSeconds)

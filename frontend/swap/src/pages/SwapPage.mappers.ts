@@ -2,12 +2,12 @@
  * SwapPage prop mappers — translate functional types (QuoteResult, Token,
  * the store's SwapState) into the design components' prop shapes.
  *
- * This is the ONLY place where the design's prototype type names
- * (MockToken, MockQuote, ...) are consumed at runtime. Components stay
+ * This is the ONLY place where the design's display type shapes
+ * (TokenDisplay, QuoteDisplay, ...) are produced at runtime. Components stay
  * untouched; mappers do the translation. Tested in
  * tests/unit/mappers.test.ts.
  */
-import type { Token, QuoteResult, MockQuote } from '@/types'
+import type { Token, QuoteResult, QuoteDisplay } from '@/types'
 import { CHAIN_CONFIG } from '@/config/chains'
 
 interface SwapFormStoreSlice {
@@ -78,7 +78,7 @@ export function mapStoreToSwapFormProps(s: SwapFormStoreSlice): SwapFormProps {
 
 /**
  * Maps a real QuoteResult into the shape design's QuoteCard expects.
- * Field names match what's declared in MockQuote in src/types.ts:
+ * Field names match what's declared in QuoteDisplay in src/types.ts:
  *   fromSymbol, toSymbol, fromAmount, fromUsd, toAmount, toUsd,
  *   ttlSeconds, minReceived, slippagePct, gasUsd, feeUsd,
  *   routeSummary, comparison.
@@ -89,7 +89,7 @@ export function mapQuoteResultToQuoteCardProps(
   toToken: Token,
   fromAmount: string,
   ttlRemaining: number
-): MockQuote {
+): QuoteDisplay {
   const gasUsd = typeof (q as any).gas_estimate === 'number'
     ? `$ ${((q as any).gas_estimate as number).toFixed(2)}`
     : typeof (q as any).gas_estimate === 'object' && (q as any).gas_estimate !== null

@@ -14,12 +14,16 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
-import { MOCK_TOKENS, type MockToken } from '@/types'
+import type { TokenDisplay } from '@/types'
+
+// Pass D will wire real token lists from the store. Until then the modal
+// opens with an empty list (search shows "No matches." immediately).
+const EMPTY_TOKENS: TokenDisplay[] = []
 
 interface TokenSelectorModalProps {
   /** Token currently selected on the opposite side — rendered muted. */
   oppositeSymbol: string
-  onSelect: (token: MockToken) => void
+  onSelect: (token: TokenDisplay) => void
   onClose: () => void
 }
 
@@ -40,9 +44,9 @@ export default function TokenSelectorModal({
   }, [onClose])
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return MOCK_TOKENS
+    if (!query.trim()) return EMPTY_TOKENS
     const q = query.trim().toLowerCase()
-    return MOCK_TOKENS.filter(
+    return EMPTY_TOKENS.filter(
       (t) => t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q),
     )
   }, [query])
@@ -133,7 +137,7 @@ function TokenRow({
   disabled,
   onClick,
 }: {
-  token: MockToken
+  token: TokenDisplay
   disabled: boolean
   onClick: () => void
 }) {

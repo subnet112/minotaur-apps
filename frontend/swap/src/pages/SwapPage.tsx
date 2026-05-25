@@ -17,7 +17,7 @@ import {
   mapStoreToSwapFormProps,
   mapQuoteResultToQuoteCardProps,
 } from './SwapPage.mappers'
-import type { Token, MockToken } from '@/types'
+import type { Token, TokenDisplay } from '@/types'
 
 import { useAppBootstrap } from '@/hooks/useAppBootstrap'
 import { useDevPreviewState } from '@/hooks/useDevPreviewState'
@@ -43,13 +43,13 @@ import RevealPanel from '@/components/dex-aggregator/RevealPanel'
 import type { ModeBlock } from '@/types'
 
 /**
- * Synthesize a MockToken shape from a functional Token for design components
- * that require MockToken fields (glyph, iconClass). These fields don't exist
+ * Synthesize a TokenDisplay shape from a functional Token for design components
+ * that require TokenDisplay fields (glyph, iconClass). These fields don't exist
  * on the functional Token type — we derive them here rather than polluting Token.
  */
-function toMockToken(t: Token): MockToken {
+function toTokenDisplay(t: Token): TokenDisplay {
   const sym = t.symbol.toLowerCase()
-  const iconMap: Record<string, MockToken['iconClass']> = {
+  const iconMap: Record<string, TokenDisplay['iconClass']> = {
     usdc: 'usdc',
     usdt: 'usdt',
     eth: 'eth',
@@ -70,8 +70,8 @@ function toMockToken(t: Token): MockToken {
   }
 }
 
-/** Fallback MockToken for when no token is selected yet. */
-const PLACEHOLDER_TOKEN: MockToken = {
+/** Fallback TokenDisplay for when no token is selected yet. */
+const PLACEHOLDER_TOKEN: TokenDisplay = {
   symbol: '—',
   name: 'Select token',
   glyph: '?',
@@ -166,9 +166,9 @@ export default function SwapPage() {
     evmRecipient,
   })
 
-  // MockToken shapes for SwapForm's fromToken/toToken
-  const fromMockToken = inputToken ? toMockToken(inputToken) : PLACEHOLDER_TOKEN
-  const toMockToken_ = outputToken ? toMockToken(outputToken) : PLACEHOLDER_TOKEN
+  // TokenDisplay shapes for SwapForm's fromToken/toToken
+  const fromTokenDisplay = inputToken ? toTokenDisplay(inputToken) : PLACEHOLDER_TOKEN
+  const toTokenDisplay_ = outputToken ? toTokenDisplay(outputToken) : PLACEHOLDER_TOKEN
 
   function handleAction() {
     if (actionState === 'disconnected') {
@@ -227,8 +227,8 @@ export default function SwapPage() {
 
           <SwapForm
             {...swapFormBase}
-            fromToken={fromMockToken}
-            toToken={toMockToken_}
+            fromToken={fromTokenDisplay}
+            toToken={toTokenDisplay_}
             fromAmount={inputAmount}
             fromUsd={`$${inputAmount || '0.00'}`}
             toAmount={String(quote?.estimated_output ?? '')}
@@ -298,7 +298,7 @@ export default function SwapPage() {
         <TokenSelectorModal
           oppositeSymbol={outputToken?.symbol ?? ''}
           onSelect={(t) => {
-            // TokenSelectorModal deals in MockToken; map back to a
+            // TokenSelectorModal deals in TokenDisplay; map back to a
             // functional Token by looking up by symbol in the store's
             // solver tokens, falling back to a minimal object.
             const solverTokens = useSwapStore.getState().solverTokens
@@ -306,7 +306,7 @@ export default function SwapPage() {
             const match = chainTokens.find(
               (tok) => tok.symbol.toUpperCase() === t.symbol.toUpperCase(),
             )
-            setInputToken(match ?? tokenFromMock(t))
+            setInputToken(match ?? tokenFromDisplay(t))
             setTokenSelectorOpen(null)
           }}
           onClose={() => setTokenSelectorOpen(null)}
@@ -316,12 +316,13 @@ export default function SwapPage() {
         <TokenSelectorModal
           oppositeSymbol={inputToken?.symbol ?? ''}
           onSelect={(t) => {
+            // TokenSelectorModal deals in TokenDisplay; map back to functional Token.
             const solverTokens = useSwapStore.getState().solverTokens
             const chainTokens = solverTokens[chainId] ?? solverTokens[sourceChainId] ?? []
             const match = chainTokens.find(
               (tok) => tok.symbol.toUpperCase() === t.symbol.toUpperCase(),
             )
-            setOutputToken(match ?? tokenFromMock(t))
+            setOutputToken(match ?? tokenFromDisplay(t))
             setTokenSelectorOpen(null)
           }}
           onClose={() => setTokenSelectorOpen(null)}
@@ -340,11 +341,11 @@ export default function SwapPage() {
 }
 
 /**
- * Last-resort fallback: construct a minimal functional Token from a MockToken
+ * Last-resort fallback: construct a minimal functional Token from a TokenDisplay
  * when the solver token list doesn't contain a match. Used only if the modal
  * is opened before bootstrap has loaded solver tokens (rare edge case).
  */
-function tokenFromMock(t: MockToken): Token {
+function tokenFromDisplay(t: TokenDisplay): Token {
   return {
     symbol: t.symbol,
     name: t.name,

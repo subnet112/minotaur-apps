@@ -9,15 +9,11 @@
  */
 import { useState } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
-import type { DesignWalletMode } from '@/types'
-import {
-  MOCK_RECENT_SWAPS,
-  MOCK_DEBUG_INFO,
-  MOCK_QUOTE_JSON,
-  MOCK_ORDER_JSON,
-  MOCK_WALLET_ADDR_EVM,
-  MOCK_WALLET_ADDR_SS58,
-} from '@/types'
+import type { DesignWalletMode, RecentSwapDisplay } from '@/types'
+
+// Pass C will wire real history from the store.
+// Until then, recent swaps render the empty-state UI.
+const RECENT_SWAPS: RecentSwapDisplay[] = []
 
 type PanelRole = 'history' | 'debug'
 
@@ -38,7 +34,7 @@ export default function RevealPanel({ role, wallet, onClose }: RevealPanelProps)
           <span className="glyph" aria-hidden="true" />
           <span>{role === 'history' ? 'Recent swaps' : 'Debug info'}</span>
           {role === 'history' && (
-            <span className="ct-count">{String(MOCK_RECENT_SWAPS.length).padStart(2, '0')}&nbsp;TOTAL</span>
+            <span className="ct-count">{String(RECENT_SWAPS.length).padStart(2, '0')}&nbsp;TOTAL</span>
           )}
         </span>
         <span className="ln" aria-hidden="true" />
@@ -55,7 +51,7 @@ export default function RevealPanel({ role, wallet, onClose }: RevealPanelProps)
 }
 
 function HistoryBody() {
-  if (MOCK_RECENT_SWAPS.length === 0) {
+  if (RECENT_SWAPS.length === 0) {
     return (
       <>
         <p className="app-rpanel-empty-title">No swaps yet.</p>
@@ -65,7 +61,7 @@ function HistoryBody() {
   }
   return (
     <>
-      {MOCK_RECENT_SWAPS.map((s, idx) => (
+      {RECENT_SWAPS.map((s, idx) => (
         <a key={idx} className="swap-row" href="#" onClick={(e) => e.preventDefault()}>
           <span className="swap-row-pair">
             <span className="swap-row-tok">
@@ -103,9 +99,9 @@ function HistoryBody() {
 
 function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
   const isConnected = wallet !== 'disconnected'
-  const addrFull = wallet === 'bittensor' ? MOCK_WALLET_ADDR_SS58 : MOCK_WALLET_ADDR_EVM
 
-  // Default both disclosures collapsed for the populated state; open with empty rows for disconnected.
+  // Pass C will wire real address + debug info from the store.
+  // Until then, address and JSON fields show empty/no-data state.
   const [quoteOpen, setQuoteOpen] = useState(!isConnected)
   const [orderOpen, setOrderOpen] = useState(!isConnected)
 
@@ -114,11 +110,11 @@ function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
       <div className="debug-grid">
         <div className="debug-field">
           <span className="k">App&nbsp;ID</span>
-          <span className="v">{MOCK_DEBUG_INFO.appId}</span>
+          <span className="v">—</span>
         </div>
         <div className="debug-field">
           <span className="k">Chain&nbsp;ID</span>
-          <span className="v">{wallet === 'bittensor' ? 'bittensor' : MOCK_DEBUG_INFO.chainId}</span>
+          <span className="v">{wallet === 'bittensor' ? 'bittensor' : '—'}</span>
         </div>
         <div className="debug-field">
           <span className="k">Wallet&nbsp;mode</span>
@@ -132,7 +128,7 @@ function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
         <div className="debug-field">
           <span className="k">Active&nbsp;address</span>
           {isConnected ? (
-            <span className="v">{addrFull}</span>
+            <span className="v">—</span>
           ) : (
             <span className="v is-empty">—</span>
           )}
@@ -145,13 +141,9 @@ function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
         open={quoteOpen}
         onToggle={() => setQuoteOpen((v) => !v)}
       >
-        {isConnected ? (
-          <pre className="app-rpanel-json">{MOCK_QUOTE_JSON}</pre>
-        ) : (
-          <p className="app-rpanel-empty-line">
-            No data&nbsp;<span className="v">·&nbsp;—</span>
-          </p>
-        )}
+        <p className="app-rpanel-empty-line">
+          No data&nbsp;<span className="v">·&nbsp;—</span>
+        </p>
       </Disclosure>
 
       <Disclosure
@@ -160,13 +152,9 @@ function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
         open={orderOpen}
         onToggle={() => setOrderOpen((v) => !v)}
       >
-        {isConnected ? (
-          <pre className="app-rpanel-json">{MOCK_ORDER_JSON}</pre>
-        ) : (
-          <p className="app-rpanel-empty-line">
-            No data&nbsp;<span className="v">·&nbsp;—</span>
-          </p>
-        )}
+        <p className="app-rpanel-empty-line">
+          No data&nbsp;<span className="v">·&nbsp;—</span>
+        </p>
       </Disclosure>
     </>
   )

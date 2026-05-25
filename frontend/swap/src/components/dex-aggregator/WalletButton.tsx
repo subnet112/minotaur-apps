@@ -14,18 +14,19 @@
  * Lifted markup mirrors components.html section 00.19 (line 7396 +).
  */
 import type { DesignWalletMode } from '@/types'
-import {
-  MOCK_WALLET_TRUNC_EVM,
-  MOCK_WALLET_TRUNC_SS58,
-} from '@/types'
 
 interface WalletButtonProps {
   mode: DesignWalletMode
   /** Opens the connect panel (when disconnected) or a menu (when connected). */
   onClick: () => void
+  /**
+   * Truncated address string to display when connected.
+   * Pass A: defaults to '' until Pass C wires real address from store.
+   */
+  address?: string
 }
 
-export default function WalletButton({ mode, onClick }: WalletButtonProps) {
+export default function WalletButton({ mode, onClick, address = '' }: WalletButtonProps) {
   if (mode === 'disconnected') {
     return (
       <button
@@ -41,26 +42,14 @@ export default function WalletButton({ mode, onClick }: WalletButtonProps) {
   }
 
   // Connected variants
-  const { modifierClass, modeLabel, address } = (() => {
+  const { modifierClass, modeLabel } = (() => {
     switch (mode) {
       case 'managed':
-        return {
-          modifierClass: 'is-managed',
-          modeLabel: 'MANAGED',
-          address: MOCK_WALLET_TRUNC_EVM,
-        }
+        return { modifierClass: 'is-managed', modeLabel: 'MANAGED' }
       case 'metamask':
-        return {
-          modifierClass: 'is-metamask',
-          modeLabel: 'BASE',
-          address: MOCK_WALLET_TRUNC_EVM,
-        }
+        return { modifierClass: 'is-metamask', modeLabel: 'BASE' }
       case 'bittensor':
-        return {
-          modifierClass: 'is-bittensor',
-          modeLabel: 'BITTENSOR',
-          address: MOCK_WALLET_TRUNC_SS58,
-        }
+        return { modifierClass: 'is-bittensor', modeLabel: 'BITTENSOR' }
     }
   })()
 
