@@ -1,8 +1,8 @@
 import { useEffect, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
-import { useSwapStore } from '../swap.store'
+import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
-import { formatAmount, shorten } from '../swap.utils'
+import { formatAmount, shorten } from '../utils'
 import * as api from '@/api/client'
 
 /**

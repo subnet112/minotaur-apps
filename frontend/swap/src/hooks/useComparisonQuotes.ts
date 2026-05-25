@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSwapStore } from '../swap.store'
+import { useSwapStore } from '../store'
 
 interface ComparisonQuote {
   protocol: string

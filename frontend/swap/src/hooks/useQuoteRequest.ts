@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from 'react'
-import { useSwapStore } from '../swap.store'
+import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
-import { parseAmount } from '../swap.utils'
+import { parseAmount } from '../utils'
 import * as api from '@/api/client'
 
 /**

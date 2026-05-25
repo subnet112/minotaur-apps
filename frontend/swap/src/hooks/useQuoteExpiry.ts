@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useSwapStore } from '../swap.store'
+import { useSwapStore } from '../store'
 
 /**
  * Countdown timer for quote expiry. Triggers re-quote when timer hits 0.

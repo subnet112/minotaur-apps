@@ -1,9 +1,9 @@
 import { useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
-import { useSwapStore } from '../swap.store'
+import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
-import { shorten } from '../swap.utils'
-import type { Token } from '../swap.types'
+import { shorten } from '../utils'
+import type { Token } from '../types'
 import * as api from '@/api/client'
 
 declare global {

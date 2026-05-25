@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
-import { useSwapStore } from '../swap.store'
+import { useSwapStore } from '../store'
 import { TOKENS } from '../swap.config'
-import type { Token } from '../swap.types'
+import type { Token } from '../types'
 import * as api from '@/api/client'
 
 /**
