@@ -255,9 +255,16 @@ export default function SwapPage() {
             fromUsd={`$${inputAmount || '0.00'}`}
             toAmount={String(quote?.estimated_output ?? '')}
             toUsd={quote ? `$${quote.estimated_output ?? ''}` : '$0.00'}
-            toIsQuoted={!!quote}
+            toIsQuoted={!!quote && !loading}
             cross={isCrossChain}
             onToggleCross={() => useSwapStore.setState({ isCrossChain: !isCrossChain })}
+            onChangeAmount={(v) => useSwapStore.getState().setInputAmount(v)}
+            onMaxClick={() => {
+              const bal = useSwapStore.getState().inputBalance
+              if (bal && bal !== '0') useSwapStore.getState().setInputAmount(bal)
+            }}
+            onPickFromChain={() => { /* chain picker UI is design-pending per IMPL §4.3 */ }}
+            onPickToChain={() => { /* chain picker UI is design-pending per IMPL §4.3 */ }}
             showRecipient={isCrossChain && walletMode === 'bittensor'}
             recipientValid={
               isCrossChain && walletMode === 'bittensor'
@@ -265,6 +272,14 @@ export default function SwapPage() {
                 : true
             }
             recipientValue={evmRecipient}
+            onChangeRecipient={(v) => useSwapStore.getState().setEvmRecipient(v, 'manual')}
+            onMetaMaskRecipient={async () => {
+              if (typeof window === 'undefined' || !window.ethereum) return
+              try {
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[]
+                if (accounts[0]) useSwapStore.getState().setEvmRecipient(accounts[0], 'metamask')
+              } catch { /* user rejected */ }
+            }}
             onSwapDirection={() => swapTokens()}
             onPickFromToken={() => setTokenSelectorOpen('input')}
             onPickToToken={() => setTokenSelectorOpen('output')}

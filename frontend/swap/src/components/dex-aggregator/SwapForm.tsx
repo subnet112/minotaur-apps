@@ -50,14 +50,27 @@ interface SwapFormProps {
   /** Show "LOADING…" placeholder on the TO input instead of a number. */
   toIsLoading: boolean
 
+  /** FROM amount input handler. */
+  onChangeAmount: (value: string) => void
+  /** MAX button — sets input to full balance. Only visible when fromBalance is truthy and > 0. */
+  onMaxClick: () => void
+
   /** Cross-chain toggle. */
   cross: boolean
   onToggleCross: () => void
 
+  /** Chain pill clicks — design pending (no-op for now). */
+  onPickFromChain?: () => void
+  onPickToChain?: () => void
+
   /** Recipient field — surfaces when `cross && wallet==='bittensor'`. */
   showRecipient: boolean
   recipientValid: boolean
-  recipientValue?: string
+  recipientValue: string
+  /** Recipient text input handler. */
+  onChangeRecipient: (value: string) => void
+  /** MetaMask button — requests eth_requestAccounts and sets recipient. */
+  onMetaMaskRecipient?: () => void
 
   /** Direction-swap (disabled in cross-chain mode). */
   onSwapDirection: () => void
@@ -104,7 +117,7 @@ export default function SwapForm(props: SwapFormProps) {
       <div className="sw-form-body">
         {/* Chain selector — single pill or x-chain pair */}
         <div className="sw-chains">
-          <button className={`sw-chain ${props.cross ? '' : 'is-active'}`.trim()} type="button">
+          <button className={`sw-chain ${props.cross ? '' : 'is-active'}`.trim()} type="button" onClick={props.onPickFromChain}>
             <span className={`logo ${props.fromChainIconClass}`}>{props.fromChainGlyph}</span>
             <span className="name">{props.fromChainName}</span>
             <span className="chev" aria-hidden="true">
@@ -114,7 +127,7 @@ export default function SwapForm(props: SwapFormProps) {
           {props.cross && props.toChainName && (
             <>
               <span className="sw-chain-route" aria-hidden="true">→</span>
-              <button className="sw-chain" type="button">
+              <button className="sw-chain" type="button" onClick={props.onPickToChain}>
                 <span className={`logo ${props.toChainIconClass}`}>{props.toChainGlyph}</span>
                 <span className="name">{props.toChainName}</span>
                 <span className="chev" aria-hidden="true">
@@ -142,10 +155,10 @@ export default function SwapForm(props: SwapFormProps) {
           </label>
           <span className="bal">
             Bal&nbsp;<span className="v">{props.fromBalance ?? '—'}</span>
-            {props.fromBalance && (
+            {props.fromBalance && props.fromBalance !== '0' && (
               <>
                 &nbsp;{props.fromToken.symbol}&nbsp;
-                <button className="max" type="button">Max</button>
+                <button className="max" type="button" onClick={props.onMaxClick}>Max</button>
               </>
             )}
           </span>
@@ -154,7 +167,7 @@ export default function SwapForm(props: SwapFormProps) {
             className={`input ${props.fromAmount ? '' : 'is-placeholder'}`.trim()}
             type="text"
             value={props.fromAmount}
-            onChange={() => {}}
+            onChange={(e) => props.onChangeAmount(e.target.value)}
             placeholder="0.00"
           />
           <button className="sw-tok" type="button" onClick={props.onPickFromToken}>
@@ -221,7 +234,7 @@ export default function SwapForm(props: SwapFormProps) {
 
         {/* Recipient (Bittensor → EVM) */}
         {props.showRecipient && (
-          <div className={`sw-recipient ${props.recipientValid ? 'is-valid' : 'is-invalid'}`}>
+          <div className={`sw-recipient ${props.recipientValue ? (props.recipientValid ? 'is-valid' : 'is-invalid') : ''}`.trim()}>
             <span className="eyebrow">
               <span className="glyph" aria-hidden="true" />
               EVM recipient
@@ -229,11 +242,22 @@ export default function SwapForm(props: SwapFormProps) {
             </span>
             <input
               type="text"
-              value={props.recipientValue ?? '0x5a33Bf4A6c1Da92e0F2BcC1eDf8a4D33C8b9c108'}
-              onChange={() => {}}
+              value={props.recipientValue}
+              onChange={(e) => props.onChangeRecipient(e.target.value)}
+              placeholder="0x…"
             />
-            {!props.recipientValid && (
-              <span className="err">Not a valid checksum address</span>
+            {props.onMetaMaskRecipient && (
+              <button
+                className="sw-recipient-mm"
+                type="button"
+                onClick={props.onMetaMaskRecipient}
+                title="Import address from MetaMask"
+              >
+                MetaMask
+              </button>
+            )}
+            {props.recipientValue && !props.recipientValid && (
+              <span className="err">Not a valid EVM address</span>
             )}
           </div>
         )}
