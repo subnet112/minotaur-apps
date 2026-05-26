@@ -25,7 +25,7 @@ FAKE_OUTPUT_AMOUNT="0.4321"
 echo "[1/4] Load page and pre-seed localStorage with a fake completed swap"
 $PW --session $S goto "$BASE/swap" --wait-for ".sw-form"
 
-$PW --session $S evaluate "
+$PW --session $S eval "(() => {
   const entry = {
     orderId: '$FAKE_ORDER_ID',
     timestamp: Date.now() - 60000,
@@ -39,8 +39,8 @@ $PW --session $S evaluate "
     txHash: null
   };
   localStorage.setItem('minotaur_swap_history', JSON.stringify([entry]));
-  console.log('localStorage seeded with fake swap history');
-"
+  return 'localStorage seeded with fake swap history';
+})()"
 
 echo "[2/4] Reload page with history=1 param to surface HistoryPanel"
 $PW --session $S goto "$BASE/swap?history=1" --wait-for ".sw-form"

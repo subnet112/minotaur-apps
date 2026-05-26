@@ -4,7 +4,7 @@
 #
 # NOTE: useDevPreviewState does NOT honor activeOrderStatus= or
 # activeOrderError= URL params. Active order state is injected via
-# pagewire evaluate(). See Gaps section below.
+# pagewire eval(). See Gaps section below.
 #
 # Gaps documented:
 #   - activeOrderStatus=failed and activeOrderError= are not honored by
@@ -21,18 +21,18 @@ echo "[1/3] Load page with wallet connected"
 $PW --session $S goto "$BASE/swap?wallet=metamask" --wait-for ".sw-form"
 
 echo "[2/3] Inject a failed order into the store"
-$PW --session $S evaluate "
+$PW --session $S eval "(() => {
   const store = window.__DEV_SWAP_STORE__ && window.__DEV_SWAP_STORE__.getState();
-  if (store) {
-    store.setActiveOrder({
-      order_id: 'test-failure-order-0001',
-      status: 'failed',
-      error: 'test failure',
-      score: null,
-      tx_hash: null,
-    });
-  }
-" 2>/dev/null || true
+  if (!store) return 'no store';
+  store.setActiveOrder({
+    order_id: 'test-failure-order-0001',
+    status: 'failed',
+    error: 'test failure',
+    score: null,
+    tx_hash: null,
+  });
+  return 'seeded failed order';
+})()" 2>/dev/null || true
 
 sleep 1
 

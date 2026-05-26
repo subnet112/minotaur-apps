@@ -5,7 +5,7 @@
 # NOTE: useDevPreviewState does NOT yet honor walletConnected, walletMode,
 # inputToken, inputAmount, or allowance URL params. This script uses the
 # supported "wallet=metamask" param to set walletMode=external + connected,
-# then injects remaining store state via pagewire evaluate() calls so the
+# then injects remaining store state via pagewire eval() calls so the
 # Approve button surfaces without a live chain call.
 #
 # Gaps documented:
@@ -22,23 +22,16 @@ echo "[1/5] Load page with wallet=metamask (external/connected)"
 $PW --session $S goto "$BASE/swap?wallet=metamask" --wait-for ".sw-form"
 
 echo "[2/5] Inject USDC input, quote stub, and needsApproval=true (simulates allowance=0)"
-$PW --session $S evaluate "
-  const { useSwapStore } = window.__swapStore__ || {};
-  if (!useSwapStore) {
-    // Fallback: access via the global Zustand devtools if available
-    console.warn('useSwapStore not on window; attempting store access via __zustand_stores__');
-  }
-  // Drive store via exposed dev helper if present (dev builds only)
+$PW --session $S eval "(() => {
   const store = window.__DEV_SWAP_STORE__ && window.__DEV_SWAP_STORE__.getState();
-  if (store) {
-    store.setInputToken({ symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6, native: false, chainId: 1, logoUrl: '' });
-    store.setInputAmount('1000');
-    store.setNeedsApproval(true);
-    store.setAppLoaded(true);
-    // Inject a minimal quote so the approval branch is reached
-    store.setQuote({ ready_params: { input_amount: '1000000000' }, route: [] });
-  }
-" 2>/dev/null || true
+  if (!store) return 'no __DEV_SWAP_STORE__ (informational only)';
+  store.setInputToken({ symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6, native: false, chainId: 1, logoUrl: '' });
+  store.setInputAmount('1000');
+  store.setNeedsApproval(true);
+  store.setAppLoaded(true);
+  store.setQuote({ ready_params: { input_amount: '1000000000' }, route: [] });
+  return 'seeded for approval flow';
+})()" 2>/dev/null || true
 
 echo "[3/5] Snap and verify ActionButton shows Approve"
 sleep 1
@@ -55,16 +48,16 @@ fi
 echo "[4/5] Reload with allowance sufficient (simulates allowance=2000000000)"
 # Reload page with wallet still connected; then inject needsApproval=false + same tokens
 $PW --session $S goto "$BASE/swap?wallet=metamask" --wait-for ".sw-form"
-$PW --session $S evaluate "
+$PW --session $S eval "(() => {
   const store = window.__DEV_SWAP_STORE__ && window.__DEV_SWAP_STORE__.getState();
-  if (store) {
-    store.setInputToken({ symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6, native: false, chainId: 1, logoUrl: '' });
-    store.setInputAmount('1000');
-    store.setNeedsApproval(false);
-    store.setAppLoaded(true);
-    store.setQuote({ ready_params: { input_amount: '1000000000' }, route: [] });
-  }
-" 2>/dev/null || true
+  if (!store) return 'no store';
+  store.setInputToken({ symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6, native: false, chainId: 1, logoUrl: '' });
+  store.setInputAmount('1000');
+  store.setNeedsApproval(false);
+  store.setAppLoaded(true);
+  store.setQuote({ ready_params: { input_amount: '1000000000' }, route: [] });
+  return 'seeded';
+})()" 2>/dev/null || true
 
 sleep 1
 SNAP2=$($PW --session $S snap --human)

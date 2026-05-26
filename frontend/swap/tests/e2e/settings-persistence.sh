@@ -43,10 +43,12 @@ if [ -n "$PRESET_REF" ]; then
   echo "  Clicked 0.5% preset ref: $PRESET_REF"
 else
   echo "  WARN: could not find 0.5% preset button ref; injecting via store instead"
-  $PW --session $S evaluate "
+  $PW --session $S eval "(() => {
     const store = window.__DEV_SWAP_STORE__ && window.__DEV_SWAP_STORE__.getState();
-    if (store) store.setSlippageBps(50);
-  " 2>/dev/null || true
+    if (!store) return 'no store';
+    store.setSlippageBps(50);
+    return 'set slippageBps=50';
+  })()" 2>/dev/null || true
 fi
 
 sleep 1
