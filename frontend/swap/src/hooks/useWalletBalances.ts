@@ -32,15 +32,19 @@ export function useWalletBalances() {
 
     api.getWalletBalances(inputAddr, inputChainId, signal).then((res: any) => {
       if (signal.aborted) return
-      const nativeBal = res.native?.balance_wei || res.eth_balance || '0'
+      // Prefer the human-readable `balance` (e.g. "953.860753") over the raw
+      // integer (`balance_wei` / `balance_raw`). The UI renders this string
+      // verbatim — using the raw integer shows "953860753 USDC" instead of
+      // "953.860753 USDC". API returns both fields per chain.
+      const nativeBal = res.native?.balance ?? res.eth_balance ?? '0'
       const tokenList: any[] = Array.isArray(res.tokens) ? res.tokens : Object.values(res.tokens || {})
 
       const getBalance = (token: Token | null): string | null => {
         if (!token) return null
         if (token.native) return nativeBal
         for (const info of tokenList) {
-          if (info.symbol?.toUpperCase() === token.symbol.toUpperCase()) return info.balance_raw || info.balance || '0'
-          if (info.address?.toLowerCase() === token.address.toLowerCase()) return info.balance_raw || info.balance || '0'
+          if (info.symbol?.toUpperCase() === token.symbol.toUpperCase()) return info.balance ?? info.balance_raw ?? '0'
+          if (info.address?.toLowerCase() === token.address.toLowerCase()) return info.balance ?? info.balance_raw ?? '0'
         }
         return '0'
       }
@@ -58,15 +62,15 @@ export function useWalletBalances() {
         if (outputAddr) {
           api.getWalletBalances(outputAddr, outputChainId, signal).then((outRes: any) => {
             if (signal.aborted) return
-            const outNativeBal = outRes.native?.balance_wei || outRes.eth_balance || '0'
+            const outNativeBal = outRes.native?.balance ?? outRes.eth_balance ?? '0'
             const outTokenList: any[] = Array.isArray(outRes.tokens) ? outRes.tokens : Object.values(outRes.tokens || {})
 
             const getOutBalance = (token: Token | null): string | null => {
               if (!token) return null
               if (token.native) return outNativeBal
               for (const info of outTokenList) {
-                if (info.symbol?.toUpperCase() === token.symbol.toUpperCase()) return info.balance_raw || info.balance || '0'
-                if (info.address?.toLowerCase() === token.address.toLowerCase()) return info.balance_raw || info.balance || '0'
+                if (info.symbol?.toUpperCase() === token.symbol.toUpperCase()) return info.balance ?? info.balance_raw ?? '0'
+                if (info.address?.toLowerCase() === token.address.toLowerCase()) return info.balance ?? info.balance_raw ?? '0'
               }
               return '0'
             }
