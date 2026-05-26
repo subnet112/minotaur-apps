@@ -16,6 +16,7 @@ import {
   mapStoreToSwapFormProps,
   mapQuoteResultToQuoteCardProps,
   mapSolverTokensToDisplay,
+  formatTokenAmount,
 } from './SwapPage.mappers'
 import type { Token, TokenDisplay, OrderStep } from '@/types'
 import { CHAIN_CONFIG } from '@/config/chains'
@@ -250,9 +251,18 @@ export default function SwapPage() {
             fromToken={fromTokenDisplay}
             toToken={toTokenDisplay_}
             fromAmount={inputAmount}
-            fromUsd={`$${inputAmount || '0.00'}`}
-            toAmount={String(quote?.estimated_output ?? '')}
-            toUsd={quote ? `$${quote.estimated_output ?? ''}` : '$0.00'}
+            // No price oracle yet — keep the slot but don't render a fake $ value.
+            fromUsd=""
+            // estimated_output is a raw integer in outputToken's smallest
+            // unit. Format with outputToken.decimals so the field shows e.g.
+            // "0.000472" instead of "472838882988870". TokenDisplay doesn't
+            // carry decimals — use the underlying Token from the store.
+            toAmount={
+              quote && outputToken
+                ? formatTokenAmount(quote.estimated_output, outputToken.decimals)
+                : ''
+            }
+            toUsd=""
             toIsQuoted={!!quote && !loading}
             cross={isCrossChain}
             onToggleCross={() => useSwapStore.setState({ isCrossChain: !isCrossChain })}

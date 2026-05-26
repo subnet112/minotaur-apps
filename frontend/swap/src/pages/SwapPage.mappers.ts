@@ -16,7 +16,7 @@ import { CHAIN_CONFIG } from '@/config/chains'
  * `maxFractionDigits` of precision and trailing-zero trim. Falls back to the
  * raw value on parse error so we never crash the UI on a malformed quote.
  */
-function formatTokenAmount(rawWei: string | null | undefined, decimals: number, maxFractionDigits = 8): string {
+export function formatTokenAmount(rawWei: string | null | undefined, decimals: number, maxFractionDigits = 8): string {
   if (rawWei == null) return '0'
   try {
     const formatted = formatUnits(rawWei, decimals)
