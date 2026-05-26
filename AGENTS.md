@@ -6,10 +6,23 @@ and similar tools.
 
 ## Pick-up references (read these first if starting a new session)
 
-- **`frontend/swap/KNOWN_ISSUES.md`** — open bugs + gaps with fix IDs. Updated as issues are found.
+- **`frontend/swap/KNOWN_ISSUES.md`** — open bugs + gaps with fix IDs, plus a "Next steps" section listing suggested follow-up tiers.
 - **`frontend/swap/README.md`** — frontend quickstart, dev commands, test layout.
 - **`README.md`** — repo overview, OSS quickstart.
 - Recent `git log` on the active branch — surfaces in-flight work.
+
+## Verify-state quickcheck
+
+```bash
+cd frontend/swap
+pnpm exec vitest run         # 290+ tests expected (post-Phase 12.8)
+pnpm exec tsc --noEmit       # clean
+pnpm dev > /tmp/dev.log 2>&1 &
+sleep 5
+for sh in tests/e2e/*.sh; do bash "$sh" > /dev/null 2>&1 && echo "PASS $sh" || echo "FAIL $sh"; done
+pnpm test:visual             # 20/20 expected
+kill %1
+```
 
 ## Repo purpose
 

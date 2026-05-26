@@ -223,3 +223,31 @@ CSS `.sw-status-err` exists; when `activeOrder.status === 'failed'` the API fail
 ### D6/FW3 — Mobile-responsive TokenSelectorModal (🟡 medium effort, ~30 min)
 
 CSS `.sw-mobile` rule for `<640px` exists but the modal renders at fixed 440px regardless. Needs viewport-based class toggle or pure-CSS layout adjustment.
+
+---
+
+## Next steps (suggested order)
+
+Tier 1 — quick wins, < 30 min each:
+1. **F20** — Set `unwrapOutput=true` when output token is native. Single conditional in `useOrderSubmission.ts` where intent params are encoded. Add a regression test in `tests/unit/intent-params.test.ts`.
+2. **F24** — Add `slippageBps` to the Zustand persist allowlist in `store.ts`. Verify with `settings-persistence.sh`.
+3. **F23** — In dev builds only, `window.__DEV_SWAP_STORE__ = useSwapStore` (gated on `import.meta.env.DEV`). Lets E2E scripts inject any state deterministically.
+4. **D2/D3** — Apply `.is-empty` modifier to comparison rows when the comparison array is empty (1-line conditional in `QuoteCard.tsx`).
+5. **F25** — Plumb `inputTokenSymbol` prop into `ActionButton` so labels read "Insufficient USDC" / "Approving WETH…" / etc. dynamically.
+
+Tier 2 — medium design wins, 15-30 min each:
+6. **FW10** — High-slippage tint: apply `.is-warn` to `.sw-settings-sec`, slider, and custom-input when `slippageBps > 500`. CSS is already there.
+7. **FW8** — QuoteCard skeleton shimmer during initial `loading && !quote`. Render `.sw-quote-skel` block.
+8. **FW9** — Per-comparison-row shimmer while external DEX quotes load. Surface a `loading` flag per row via mapper.
+9. **FW13** — Inline error message block in OrderStatusCard when `activeOrder.status === 'failed'`. Render `.sw-status-err` with API error reason.
+10. **FW3** — Mobile-responsive TokenSelectorModal. Add `useMediaQuery('(max-width: 639px)')` hook or pure CSS rule.
+
+Tier 3 — Wave 3 (deferred from original plan):
+11. **F22** — Tighten visual regression tolerances after the design polish items land. Target band 0.005–0.10 (down from current 0.02–0.25).
+12. **Coverage script** — Add `pnpm test:coverage` to `package.json` using vitest's built-in v8 provider. Report numbers; do not enforce thresholds in CI.
+
+Tier 4 — design-pending (blocked on designer input):
+- FW1 (Wallet menu dropdown), FW2 (full Chain picker), FW4/FW5 (WalletConnectPanel error variants), FW12 (connect/disconnect toasts), FW14/FW15/FW16 (approval/settings-saved/copy-address toasts).
+
+Tier 5 — separate phase (contracts repo, not frontend):
+- Make `executeIntent` payable in `AppIntentBase`; add WETH wrapping in `_fundAndExecute`; restore native ETH input path on the frontend.
