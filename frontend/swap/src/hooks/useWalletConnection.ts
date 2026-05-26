@@ -1,10 +1,67 @@
 import { useEffect, useCallback } from 'react'
 import { useToast } from '@/components/shell'
 import { useSwapStore } from '../store'
-import { BITTENSOR_CHAIN_ID } from '@/config/chains'
+import { BITTENSOR_CHAIN_ID, CHAIN_CONFIG } from '@/config/chains'
 import { shorten } from '../utils'
 import type { Token } from '../types'
 import * as api from '@/api/client'
+
+// MetaMask wallet_addEthereumChain params require fields not present on ChainConfig
+// (rpcUrls, nativeCurrency). Keep them here so switchChain can fall back on 4902.
+const ADD_CHAIN_PARAMS: Record<number, object> = {
+  1: {
+    chainId: '0x1',
+    chainName: 'Ethereum Mainnet',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    rpcUrls: ['https://mainnet.infura.io/v3/'],
+    blockExplorerUrls: ['https://etherscan.io'],
+  },
+  8453: {
+    chainId: '0x2105',
+    chainName: 'Base',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    rpcUrls: ['https://mainnet.base.org'],
+    blockExplorerUrls: ['https://basescan.org'],
+  },
+  964: {
+    chainId: '0x3c4',
+    chainName: 'Bittensor EVM',
+    nativeCurrency: { name: 'TAO', symbol: 'TAO', decimals: 18 },
+    rpcUrls: ['https://lite.chain.opentensor.ai'],
+    blockExplorerUrls: ['https://evm.taostats.io'],
+  },
+}
+
+/**
+ * Asks MetaMask to switch to the given chain. If the chain is not added
+ * (error code 4902), falls back to wallet_addEthereumChain using the
+ * metadata in ADD_CHAIN_PARAMS. Silently ignores user-rejection errors.
+ */
+export async function switchChain(targetChainId: number): Promise<void> {
+  if (typeof window === 'undefined' || !window.ethereum) return
+  const chainCfg = CHAIN_CONFIG[targetChainId]
+  if (!chainCfg) return
+  const hexChainId = '0x' + targetChainId.toString(16)
+  try {
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: hexChainId }],
+    })
+  } catch (e: unknown) {
+    const err = e as { code?: number }
+    if (err?.code === 4902) {
+      const addParams = ADD_CHAIN_PARAMS[targetChainId]
+      if (addParams) {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [addParams],
+        })
+      }
+    }
+    // User rejection (4001) and other errors are silently ignored —
+    // callers do not need to handle them.
+  }
+}
 
 declare global {
   interface Window {
@@ -213,6 +270,24 @@ export function useWalletConnection() {
   // transition lands on success or error. One id — one terminal update.
   const setupBittensorProxy = useCallback(async () => {
     if (!store.bittensorAddress) return
+
+    // F18: pre-check — if a permission is already active for this account,
+    // skip the full on-chain proxy setup flow and surface that to the user.
+    try {
+      const permCheckRes = await fetch(`/api/v1/native-bittensor/permissions?owner=${store.bittensorAddress}`)
+      if (permCheckRes.ok) {
+        const permCheckData = await permCheckRes.json()
+        const permissions = permCheckData.permissions || []
+        if (permissions.some((p: any) => p.status === 'active')) {
+          store.setBittensorProxySetup(true)
+          toast.success({ title: 'Proxy delegation already active' })
+          return
+        }
+      }
+    } catch {
+      // Pre-check failure is non-fatal — proceed with the full setup flow.
+    }
+
     const id = toast.loading({ title: 'Setting up Bittensor proxy…' })
     try {
       store.setLoading(true)
@@ -322,6 +397,7 @@ export function useWalletConnection() {
     fundManagedWallet,
     connectBittensorWallet,
     setupBittensorProxy,
+    switchChain,
     hasMetaMask,
   }
 }

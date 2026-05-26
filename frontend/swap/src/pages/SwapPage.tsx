@@ -263,26 +263,8 @@ export default function SwapPage() {
               const bal = useSwapStore.getState().inputBalance
               if (bal && bal !== '0') useSwapStore.getState().setInputAmount(bal)
             }}
-            onPickFromChain={(chainId) => {
-              useSwapStore.getState().setSourceChainId(chainId)
-              // For external wallets, request the wallet to switch networks
-              if (useSwapStore.getState().walletMode === 'external' && typeof window !== 'undefined' && window.ethereum) {
-                window.ethereum.request({
-                  method: 'wallet_switchEthereumChain',
-                  params: [{ chainId: '0x' + chainId.toString(16) }],
-                }).catch(() => { /* user rejected or chain not added */ })
-              }
-            }}
-            onPickToChain={(chainId) => {
-              useSwapStore.setState({ chainId })
-              // For external wallets, request the wallet to switch networks
-              if (useSwapStore.getState().walletMode === 'external' && typeof window !== 'undefined' && window.ethereum) {
-                window.ethereum.request({
-                  method: 'wallet_switchEthereumChain',
-                  params: [{ chainId: '0x' + chainId.toString(16) }],
-                }).catch(() => { /* user rejected or chain not added */ })
-              }
-            }}
+            onPickFromChain={(id) => { useSwapStore.getState().setSourceChainId(id); void wallet.switchChain(id) }}
+            onPickToChain={(id) => { useSwapStore.setState({ chainId: id }); void wallet.switchChain(id) }}
             showRecipient={isCrossChain && walletMode === 'bittensor'}
             recipientValid={
               isCrossChain && walletMode === 'bittensor'
