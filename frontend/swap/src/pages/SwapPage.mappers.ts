@@ -7,8 +7,27 @@
  * untouched; mappers do the translation. Tested in
  * tests/unit/mappers.test.ts.
  */
+import { formatUnits } from 'ethers'
 import type { Token, QuoteResult, QuoteDisplay, TokenDisplay } from '@/types'
 import { CHAIN_CONFIG } from '@/config/chains'
+
+/**
+ * Format a raw integer-string amount using a token's decimals, with up to
+ * `maxFractionDigits` of precision and trailing-zero trim. Falls back to the
+ * raw value on parse error so we never crash the UI on a malformed quote.
+ */
+function formatTokenAmount(rawWei: string | null | undefined, decimals: number, maxFractionDigits = 8): string {
+  if (rawWei == null) return '0'
+  try {
+    const formatted = formatUnits(rawWei, decimals)
+    if (!formatted.includes('.')) return formatted
+    const [whole, frac] = formatted.split('.')
+    const trimmed = frac.slice(0, maxFractionDigits).replace(/0+$/, '')
+    return trimmed.length === 0 ? whole : `${whole}.${trimmed}`
+  } catch {
+    return String(rawWei)
+  }
+}
 
 interface SwapFormStoreSlice {
   sourceChainId: number
@@ -130,14 +149,24 @@ export function mapQuoteResultToQuoteCardProps(
   fromAmount: string,
   ttlRemaining: number
 ): QuoteDisplay {
-  const gasUsd = typeof (q as any).gas_estimate === 'number'
-    ? `$ ${((q as any).gas_estimate as number).toFixed(2)}`
-    : typeof (q as any).gas_estimate === 'object' && (q as any).gas_estimate !== null
-      ? `$ ${((q as any).gas_estimate as { usd: number }).usd.toFixed(2)}`
-      : '$ 0.00'
+  // The API returns `gas_estimate` in *gas units* (e.g. 550000), not USD.
+  // Without a live gas-price + ETH/USD oracle we can't render dollars
+  // honestly — show the unit count instead. When the API surfaces an
+  // object with a `.usd` field we'll prefer that.
+  const gasEstimate = (q as any).gas_estimate
+  const gasUsd = typeof gasEstimate === 'object' && gasEstimate !== null && typeof gasEstimate.usd === 'number'
+    ? `$ ${gasEstimate.usd.toFixed(2)}`
+    : typeof gasEstimate === 'number'
+      ? `~${gasEstimate.toLocaleString()} gas`
+      : '—'
 
-  const feeWei = parseFloat(q.platform_fee_wei ?? '0')
-  const feeUsd = feeWei > 0 ? `$ ${(feeWei / 1e18).toFixed(2)}` : '$ 0.00'
+  // Platform fee is denominated in the chain's wrapped native token (18 dec
+  // for ETH / wTAO), per AppIntentBase.wrappedNativeToken. No USD oracle
+  // available — show the native amount with its symbol from the response.
+  const feeSymbol = (q as any).platform_fee_symbol ?? 'ETH'
+  const feeRaw = q.platform_fee_wei ?? '0'
+  const feeFormatted = formatTokenAmount(feeRaw, 18)
+  const feeUsd = feeFormatted === '0' ? '0' : `${feeFormatted} ${feeSymbol}`
 
   const clampedTtl = Math.max(0, ttlRemaining)
 
@@ -146,10 +175,13 @@ export function mapQuoteResultToQuoteCardProps(
     toSymbol: toToken.symbol,
     fromAmount,
     fromUsd: '',
-    toAmount: q.estimated_output,
+    // estimated_output / suggested_min_output are raw integer strings in
+    // the destination token's smallest unit. Convert with toToken.decimals
+    // so the user sees "0.000472 WETH" instead of "472838882988870".
+    toAmount: formatTokenAmount(q.estimated_output, toToken.decimals),
     toUsd: '',
     ttlSeconds: clampedTtl,
-    minReceived: `${q.suggested_min_output} ${toToken.symbol}`,
+    minReceived: `${formatTokenAmount(q.suggested_min_output, toToken.decimals)} ${toToken.symbol}`,
     slippagePct: q.slippage_bps != null ? `${(q.slippage_bps / 100).toFixed(2)} %` : '0.50 %',
     gasUsd,
     feeUsd,
@@ -157,8 +189,9 @@ export function mapQuoteResultToQuoteCardProps(
     // TODO: populate comparison when the API surfaces `comparison_quotes`.
     // Expected shape per quote object:
     //   comparison_quotes: Array<{ name: string; output_amount: string }>
-    // where `name` is one of 'Uniswap' | 'Curve' | 'Balancer'.
-    comparison: mapComparisonQuotes((q as any).comparison_quotes),
+    // where `name` is one of 'Uniswap' | 'Curve' | 'Balancer'. Raw integer
+    // strings get formatted with toToken.decimals like the main output.
+    comparison: mapComparisonQuotes((q as any).comparison_quotes, toToken.decimals),
   }
 }
 
@@ -177,11 +210,13 @@ const DEX_META: Record<string, { glyph: string; iconClass: 'uni' | 'crv' | 'bal'
  * compat while the API field is not yet populated.
  */
 function mapComparisonQuotes(
-  raw: Array<{ name: string; output_amount: string }> | null | undefined
+  raw: Array<{ name: string; output_amount: string }> | null | undefined,
+  toDecimals: number,
 ): QuoteDisplay['comparison'] {
   if (!raw || raw.length === 0) return []
 
-  // Find the index of the row with the highest output_amount.
+  // Find the index of the row with the highest output_amount (raw integer
+  // comparison is fine — same decimals across rows).
   let bestIdx = 0
   let bestVal = -Infinity
   raw.forEach((row, idx) => {
@@ -198,7 +233,7 @@ function mapComparisonQuotes(
       dex: row.name as 'Uniswap' | 'Curve' | 'Balancer',
       glyph: meta.glyph,
       iconClass: meta.iconClass,
-      outAmount: row.output_amount,
+      outAmount: formatTokenAmount(row.output_amount, toDecimals),
       deltaPct: '',
       deltaDir: 'none' as const,
       isBest: idx === bestIdx,
