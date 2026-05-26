@@ -12,6 +12,7 @@ import BracketCorners from '@/components/primitives/BracketCorners'
 import { useSwapStore } from '@/store'
 import { useToast } from '@/components/shell/ToastViewport'
 import { CHAIN_CONFIG } from '@/config/chains'
+import { TERMINAL_FILLED, TERMINAL_FAILED } from '@/lib/orderStatus'
 import type { DesignWalletMode, SwapHistoryItem } from '@/types'
 
 type PanelRole = 'history' | 'debug'
@@ -80,10 +81,13 @@ function HistoryCount() {
   )
 }
 
-/** Map SwapHistoryItem.status → design badge modifier. */
+/** Map SwapHistoryItem.status → design badge modifier.
+ *  Pulls the failure set from @/lib/orderStatus so rejected / expired /
+ *  bridge_failed / rolled_back / partial_rollback show as failed instead
+ *  of forever-pending. */
 function statusToBadge(status: string): 'confirmed' | 'pending' | 'failed' {
-  if (status === 'filled') return 'confirmed'
-  if (status === 'failed') return 'failed'
+  if (TERMINAL_FILLED.has(status)) return 'confirmed'
+  if (TERMINAL_FAILED.has(status)) return 'failed'
   return 'pending'
 }
 

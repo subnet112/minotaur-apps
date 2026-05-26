@@ -23,6 +23,16 @@ export function useOrderSubmission() {
         const status = await api.getOrderStatus(orderId)
         store.setActiveOrder(status)
 
+        // Keep the matching history row in sync so the RevealPanel shows
+        // the order's *current* state instead of whatever it was at submit
+        // time (always 'open'). Without this rejections / fills / expiries
+        // are invisible in history.
+        store.updateHistoryItem(orderId, {
+          status: status.status,
+          score: status.score ?? null,
+          txHash: (status as Record<string, unknown>).tx_hash as string | null | undefined ?? null,
+        })
+
         // Match the subnet's full OrderStatus enum — 'rejected' / 'expired'
         // / 'bridge_failed' etc. were missing here, so polling never stopped
         // and the failure toast never fired on real production rejections.

@@ -128,6 +128,10 @@ interface SwapActions {
 
   // History
   addToHistory: (swap: SwapHistoryItem) => void
+  /** Patch the row matching `orderId` in place — used by the polling loop
+   *  so terminal states (filled / rejected / cancelled / …) and tx hashes
+   *  flow into the history panel instead of staying stuck at 'open'. */
+  updateHistoryItem: (orderId: string, patch: Partial<SwapHistoryItem>) => void
   clearHistory: () => void
   loadHistory: () => void
 
@@ -310,6 +314,18 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
     const history = [swap, ...get().recentSwaps].slice(0, 10)
     localStorage.setItem('minotaur_swap_history', JSON.stringify(history))
     set({ recentSwaps: history })
+  },
+  updateHistoryItem: (orderId, patch) => {
+    const current = get().recentSwaps
+    let changed = false
+    const next = current.map((s) => {
+      if (s.orderId !== orderId) return s
+      changed = true
+      return { ...s, ...patch }
+    })
+    if (!changed) return
+    localStorage.setItem('minotaur_swap_history', JSON.stringify(next))
+    set({ recentSwaps: next })
   },
   clearHistory: () => {
     localStorage.removeItem('minotaur_swap_history')
