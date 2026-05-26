@@ -342,6 +342,7 @@ export default function SwapPage() {
         <TokenSelectorModal
           tokens={modalTokens}
           oppositeSymbol={outputToken?.symbol ?? ''}
+          sideOpen="input"
           canImport={typeof window !== 'undefined' && !!window.ethereum}
           onCustomImport={makeCustomImportHandler(sourceChainId)}
           onSelect={(t) => {
@@ -360,6 +361,7 @@ export default function SwapPage() {
         <TokenSelectorModal
           tokens={modalTokens}
           oppositeSymbol={inputToken?.symbol ?? ''}
+          sideOpen="output"
           canImport={typeof window !== 'undefined' && !!window.ethereum}
           onCustomImport={makeCustomImportHandler(sourceChainId)}
           onSelect={(t) => {

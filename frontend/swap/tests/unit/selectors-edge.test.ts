@@ -298,8 +298,7 @@ describe('selectActionState — inputBalance edge cases', () => {
 })
 
 describe('selectActionState — post-F21 native ETH regression guard', () => {
-  // .skip until D\'s F21 commit merges; this is the regression guard for it
-  it.skip('native ETH as input token must NEVER produce "sign-broadcast" after F21', () => {
+  it('native ETH as input token must NEVER produce "sign-broadcast" after F21', () => {
     // After F21 (D\'s branch removes the native-input code path in useOrderSubmission.ts
     // and removes the sign-broadcast return from selectActionState), native ETH should
     // fall through to "swap-ready" rather than "sign-broadcast".
