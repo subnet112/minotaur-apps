@@ -313,24 +313,16 @@ export function useOrderSubmission() {
           toast.update(submitId, { variant: 'loading', title: 'Please sign the swap order in MetaMask…' })
           const userSignature = await signer.signTypedData(domain, types, value)
 
-          // M4 (subnet audit 2026-05-25): PATCH /orders/{id}/signature now
-          // requires a SECOND signature — owner_signature — proving the
-          // caller controls order.submitted_by. Build the digest the server
-          // expects and personal_sign it. Same signer prompts twice in
-          // MetaMask: once for the EIP-712 IntentOrder, once for the
-          // EIP-191 AttachSig action.
-          toast.update(submitId, { variant: 'loading', title: 'Confirm the ownership signature in MetaMask…' })
-          const { buildAttachSigOwnerSignature } = await import('@/lib/orderOwnerSig')
-          const { ownerSignature, deadline: ownerSigDeadline } = await buildAttachSigOwnerSignature(signer, {
-            orderId: order.order_id,
-            userSignature,
-            chainId: store.chainId,
-          })
-
+          // Single signature flow per subnet PR #55 (api: drop EIP-191
+          // owner_signature on attach_signature, server-side ECDSA-recovers
+          // the EIP-712 IntentOrder sig and checks the recovered address
+          // equals submitted_by). The /cancel + /tx-confirmed flows still
+          // need the EIP-191 helper (@/lib/orderOwnerSig is kept for them).
+          //
           // Step 3: Attach signature via the API client (honours VITE_API_URL).
           // A hardcoded relative fetch here used to silently 404 in production
           // because CloudFront doesn't proxy /api/* to the backend.
-          await api.attachSignature(order.order_id, userSignature, ownerSignature, ownerSigDeadline)
+          await api.attachSignature(order.order_id, userSignature)
           // Signature attached — update back to generic "submitting" while the
           // relayer picks up the order. The success transition happens below
           // once store.setActiveOrder is called.

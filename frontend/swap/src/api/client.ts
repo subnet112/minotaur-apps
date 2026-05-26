@@ -321,25 +321,19 @@ export function confirmUserSubmittedTx(
  * `/api/v1/...` fetch would 404 in prod because CloudFront doesn't route
  * that path to the backend.
  *
- * M4 (subnet audit 2026-05-25): server also requires `owner_signature` —
- * an EIP-191 personal_sign over the AttachSig action payload binding
- * the user_signature being attached — and a `deadline` (unix seconds,
- * <24h in the future). Build both with `buildAttachSigOwnerSignature()`
- * in @/lib/orderOwnerSig.
+ * Per subnet PR #55, the server now server-side ECDSA-recovers the
+ * EIP-712 IntentOrder signature and checks it equals submitted_by — no
+ * second EIP-191 owner_signature needed. Legacy owner_signature +
+ * deadline body fields are silently accepted-and-ignored by the server,
+ * so old clients keep working through the deploy.
  */
 export function attachSignature(
   orderId: string,
   userSignature: string,
-  ownerSignature: string,
-  deadline: number,
 ): Promise<{ order_id: string; signature_attached: boolean }> {
   return request(`/v1/orders/${encodeURIComponent(orderId)}/signature`, {
     method: 'PATCH',
-    body: JSON.stringify({
-      user_signature: userSignature,
-      owner_signature: ownerSignature,
-      deadline,
-    }),
+    body: JSON.stringify({ user_signature: userSignature }),
   })
 }
 
