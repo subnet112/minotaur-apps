@@ -320,14 +320,26 @@ export function confirmUserSubmittedTx(
  * Goes through `request(...)` which honours VITE_API_URL — a hardcoded
  * `/api/v1/...` fetch would 404 in prod because CloudFront doesn't route
  * that path to the backend.
+ *
+ * M4 (subnet audit 2026-05-25): server also requires `owner_signature` —
+ * an EIP-191 personal_sign over the AttachSig action payload binding
+ * the user_signature being attached — and a `deadline` (unix seconds,
+ * <24h in the future). Build both with `buildAttachSigOwnerSignature()`
+ * in @/lib/orderOwnerSig.
  */
 export function attachSignature(
   orderId: string,
   userSignature: string,
+  ownerSignature: string,
+  deadline: number,
 ): Promise<{ order_id: string; signature_attached: boolean }> {
   return request(`/v1/orders/${encodeURIComponent(orderId)}/signature`, {
     method: 'PATCH',
-    body: JSON.stringify({ user_signature: userSignature }),
+    body: JSON.stringify({
+      user_signature: userSignature,
+      owner_signature: ownerSignature,
+      deadline,
+    }),
   })
 }
 
