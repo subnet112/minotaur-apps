@@ -14,22 +14,6 @@ Tracked correctness gaps and incomplete behavior in `frontend/swap/`. Maintained
 
 ## 🔴 Critical
 
-### F21 — Native ETH input reverts on-chain
-
-**Status:** Open. Fix planned in Phase 12.8 by removing the flow from the frontend.
-
-**Where:** `src/hooks/useOrderSubmission.ts:182-189, 345-364`. Also see inline `⚠️ KNOWN-ISSUE F21` warning comment in that file.
-
-**What happens:** User selects native ETH as input → ActionButton shows "Sign & broadcast" → MetaMask popup with TX value → user signs → TX reverts with "invalid callvalue". Funds NOT lost (TX never executes) but swap silently fails. MetaMask shows opaque "Transaction failed."
-
-**Root cause:** `executeIntent` in `AppIntentBase` is not `payable`. `DexAggregatorApp.sol` has zero `IWETH.deposit()` calls. `msg.value == 0` guards at `DexAggregatorApp.sol:207, 291` explicitly skip fee processing when msg.value > 0. Zero Foundry tests cover this path (`contracts/test/DexAggregator.t.sol` has 1,449 lines and zero `{value: ...}()` calls).
-
-**Workaround for users:** wrap ETH → WETH manually (e.g. via the WETH contract's `deposit()`) before swapping. The standard ERC-20 flow then works.
-
-**Fix (Phase 12.8):** delete the `isNativeInput` detection block + `_user_submit=true` flag + `prepareDirectSubmit` + `signer.sendTransaction({value})` path. Update `selectActionState` to not return `'sign-broadcast'` for native input.
-
-**Long-term fix (separate phase against contracts repo):** make `executeIntent` payable in `AppIntentBase`; wrap msg.value via `IWETH.deposit{value: msg.value}()` inside `_fundAndExecute`; add Foundry tests for the native path; verify protocol fee handling when msg.value > 0.
-
 ### F1 — Zero hook unit tests
 
 **Status:** Open. Phase 12.8 will add ~150 test cases.
@@ -226,4 +210,8 @@ SettingsSheet's Done button should fire `toast.success({ title: 'Settings saved'
 
 (Entries move here once fixed, with the resolving commit SHA and date.)
 
-— none yet —
+### F21 — Native ETH input (resolved 2026-05-26, frontend only)
+
+The broken native-ETH input flow has been removed from the frontend. The `isNativeInput` detection block, `_user_submit=true` flag, `prepareDirectSubmit` API call, and `signer.sendTransaction({value})` branch have been deleted from `useOrderSubmission.ts`. `selectActionState` no longer returns `'sign-broadcast'` for native input — native ETH now falls through to `'swap-ready'` (or `'insufficient'` if balance is low). `TokenSelectorModal` disables native ETH rows with a `(wrap first)` label when the INPUT side is open and WETH is available in the token list.
+
+Contract upgrade tracked separately — make `executeIntent` payable + WETH wrapping: `executeIntent` in `AppIntentBase` must be made payable, and `_fundAndExecute` must call `IWETH.deposit{value: msg.value}()` to wrap native input atomically. Add Foundry tests for the native path and verify protocol fee handling when `msg.value > 0`.

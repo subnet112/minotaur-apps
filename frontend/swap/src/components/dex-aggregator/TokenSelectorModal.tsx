@@ -35,6 +35,12 @@ interface TokenSelectorModalProps {
   onCustomImport?: (address: string) => Promise<TokenDisplay | null>
   /** When false (or omitted), the import row is never shown. */
   canImport?: boolean
+  /**
+   * Which token slot is being selected. When 'input' and a WETH alternative
+   * exists in the list, native ETH rows are rendered disabled with a
+   * "(wrap first)" label — F21 UX guard.
+   */
+  sideOpen?: 'input' | 'output'
 }
 
 export default function TokenSelectorModal({
@@ -44,10 +50,18 @@ export default function TokenSelectorModal({
   onClose,
   onCustomImport,
   canImport = false,
+  sideOpen,
 }: TokenSelectorModalProps) {
   const [query, setQuery] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+
+  // F21 UX guard: when selecting the INPUT token, disable native ETH rows if a
+  // WETH alternative is present in the list. The contract's executeIntent is not
+  // payable, so native ETH input reverts on-chain. User must wrap to WETH first.
+  const wethPresent = sideOpen === 'input' && tokens.some(
+    (t) => !t.native && t.symbol.toUpperCase() === 'WETH',
+  )
 
   // Esc dismisses.
   useEffect(() => {
@@ -198,6 +212,7 @@ export default function TokenSelectorModal({
                   key={t.address ?? t.symbol}
                   token={t}
                   disabled={t.symbol === oppositeSymbol}
+                  nativeDisabled={!!(t.native && wethPresent)}
                   onClick={() => {
                     onSelect(t)
                     onClose()
@@ -218,6 +233,7 @@ export default function TokenSelectorModal({
                   key={t.address ?? t.symbol}
                   token={t}
                   disabled={t.symbol === oppositeSymbol}
+                  nativeDisabled={!!(t.native && wethPresent)}
                   onClick={() => {
                     onSelect(t)
                     onClose()
@@ -235,25 +251,29 @@ export default function TokenSelectorModal({
 function TokenRow({
   token,
   disabled,
+  nativeDisabled = false,
   onClick,
 }: {
   token: TokenDisplay
   disabled: boolean
+  /** True when this is a native token and WETH is available — F21 guard. */
+  nativeDisabled?: boolean
   onClick: () => void
 }) {
+  const isDisabled = disabled || nativeDisabled
   // Renders as <div role="button"> — matches the prototype HTML which
   // uses <div class="sw-tmod-row">. A <button> here breaks the row's
   // CSS grid because of the browser-default `width: auto` +
   // `text-align: center` on buttons, which produces ragged-width rows.
   return (
     <div
-      className={`sw-tmod-row ${disabled ? 'is-disabled' : ''}`.trim()}
+      className={`sw-tmod-row ${isDisabled ? 'is-disabled' : ''}`.trim()}
       role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled}
-      onClick={disabled ? undefined : onClick}
+      tabIndex={isDisabled ? -1 : 0}
+      aria-disabled={isDisabled}
+      onClick={isDisabled ? undefined : onClick}
       onKeyDown={(e) => {
-        if (disabled) return
+        if (isDisabled) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onClick()
@@ -262,12 +282,17 @@ function TokenRow({
     >
       <span className={`ico ${token.iconClass}`}>{token.glyph}</span>
       <span className="meta">
-        <span className="sym">{token.symbol}</span>
+        <span className="sym">
+          {token.symbol}
+          {nativeDisabled ? ' (wrap first)' : ''}
+        </span>
         <span className="name">{token.name}</span>
       </span>
       <span className="right">
         {disabled ? (
           <span className="dis">Already selected</span>
+        ) : nativeDisabled ? (
+          <span className="dis">Wrap to WETH first</span>
         ) : (
           <>
             <span className="bal">{token.balance}</span>

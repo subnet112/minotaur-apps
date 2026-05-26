@@ -46,6 +46,15 @@ export function useOrderSubmission() {
                   status.tx_hash.startsWith('0x') ? status.tx_hash : '0x' + status.tx_hash
                 )
                 if (receipt) {
+                  // SwapExecuted event ABI — keep in sync with contracts/src/DexAggregatorApp.sol:
+                  //   event SwapExecuted(
+                  //     bytes32 indexed orderId,
+                  //     address tokenIn,
+                  //     address tokenOut,
+                  //     uint256 amountIn,
+                  //     uint256 amountOut,
+                  //     uint256 fee
+                  //   )
                   const swapTopic = ethers.id('SwapExecuted(bytes32,address,address,address,uint256,uint256,uint256)')
                   const swapLog = receipt.logs.find(l => l.topics[0] === swapTopic)
                   if (swapLog) {
@@ -81,7 +90,7 @@ export function useOrderSubmission() {
       } catch {
         // Polling errors are transient -- keep trying
       }
-    }, 3000)
+    }, 2000)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -172,34 +181,6 @@ export function useOrderSubmission() {
       }
 
       // NOTE: ERC-20 approval is handled by the ActionButton (Approve step).
-
-      // ⚠️ KNOWN-ISSUE F21 (see frontend/swap/KNOWN_ISSUES.md):
-      // This native-input branch is BROKEN on-chain as of 2026-05-26.
-      // executeIntent in AppIntentBase is not payable; DexAggregatorApp
-      // has zero IWETH.deposit() calls; msg.value==0 guards at
-      // DexAggregatorApp.sol:207,291 skip fee processing when msg.value > 0.
-      // TX will revert with "invalid callvalue" before any swap logic runs.
-      // Funds are NOT lost (TX never executes) but no swap happens.
-      //
-      // Phase 12.8 will remove this branch entirely. Users must wrap
-      // ETH → WETH manually until the contract gains payable + WETH-wrap
-      // support. Tracked in:
-      //   docs/superpowers/specs/2026-05-26-phase-12.8-correctness-fixes-spec.md (F21)
-      //
-      // Native ETH/TAO input: mark the order for user-direct-submit. The
-      // relayer can't pull msg.value from an external wallet, so for native
-      // input the user would send the executeIntent TX themselves (single
-      // MetaMask popup). The contract was supposed to wrap msg.value → WETH
-      // atomically inside _fundAndExecute, but never gained that code path.
-      // For ERC-20 input, the standard relayer flow stays unchanged.
-      const isNativeInput = !!(
-        store.walletMode === 'external' &&
-        store.inputToken?.native &&
-        window.ethereum
-      )
-      if (isNativeInput) {
-        orderParams._user_submit = true
-      }
 
       // Cross-chain or EVM: use the standard order flow
       if (store.sourceChainId === BITTENSOR_CHAIN_ID && store.bittensorConnected) {
@@ -355,51 +336,8 @@ export function useOrderSubmission() {
         status: order.status,
       })
 
-      // Native ETH input: user submits executeIntent directly with msg.value.
-      // The relayer can't pull native tokens, only the account holder can
-      // attach msg.value. The contract wraps it to WETH atomically inside
-      // _fundAndExecute, so this ends up as a single MetaMask popup.
-      if (isNativeInput) {
-        // Sticky-loading-update for the direct-TX phase: new loading toast
-        // since the submit loading toast has already resolved to success above.
-        const txId = toast.loading({ title: 'Waiting for validator consensus…' })
-        try {
-          const prepared = await api.prepareDirectSubmit(order.order_id)
-
-          const { ethers } = await import('ethers')
-          const provider = new ethers.BrowserProvider(window.ethereum!)
-          const signer = await provider.getSigner()
-
-          toast.update(txId, { variant: 'loading', title: 'Submit the swap transaction in MetaMask…' })
-          const tx = await signer.sendTransaction({
-            to: prepared.contract_address,
-            data: prepared.calldata,
-            value: BigInt(prepared.value),
-          })
-          toast.update(txId, { variant: 'success', title: `TX sent: ${shorten(tx.hash, 6)}` })
-          // Wait for the receipt, then finalize the order on the API.
-          // The API doesn't watch IntentExecuted events on its own, so the
-          // frontend is responsible for closing the loop for user-direct TXs.
-          const receipt = await tx.wait()
-          if (receipt && receipt.status === 1) {
-            await api.confirmUserSubmittedTx(order.order_id, tx.hash)
-          }
-          // Poll picks up the FILLED status and fetches execution details.
-          pollOrderStatus(order.order_id)
-        } catch (txErr: any) {
-          if (txErr?.code === 'ACTION_REJECTED' || txErr?.code === 4001) {
-            store.setError('Transaction rejected')
-            toast.update(txId, { variant: 'error', title: 'Transaction rejected' })
-          } else {
-            console.error('Direct-submit TX failed:', txErr)
-            store.setError(txErr?.message || 'Direct submission failed')
-            toast.update(txId, { variant: 'error', title: 'Direct submission failed', message: txErr?.message })
-          }
-        }
-      } else {
-        // ERC-20 input: relayer submits the TX (gasless UX preserved).
-        pollOrderStatus(order.order_id)
-      }
+      // ERC-20 input: relayer submits the TX (gasless UX preserved).
+      pollOrderStatus(order.order_id)
     } catch (e) {
       store.setError((e as Error).message)
       // Only reached for errors not already handled in the submit/signing

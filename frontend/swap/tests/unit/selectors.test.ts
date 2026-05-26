@@ -107,11 +107,11 @@ describe('selectActionState', () => {
     expect(selectActionState(s)).toBe('submitting')
   })
 
-  it('returns "sign-broadcast" for external wallet with native input token', () => {
+  it('returns "swap-ready" for external wallet with native input token (F21: sign-broadcast removed)', () => {
     const s = { ...baseState(), walletConnected: true, walletMode: 'external', walletChainId: 1,
                 inputAmount: '10', inputBalance: '100',
                 quote: {} as any, inputToken: nativeToken }
-    expect(selectActionState(s)).toBe('sign-broadcast')
+    expect(selectActionState(s)).toBe('swap-ready')
   })
 
   it('returns "swap-ready" for the happy path (external + erc20 + quote)', () => {

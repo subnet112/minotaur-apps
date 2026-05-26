@@ -65,8 +65,6 @@ export function selectActionState(s: SelectableState): ActionState {
     return 'submitting'
   }
 
-  if (s.inputToken?.native && s.walletMode === 'external') return 'sign-broadcast'
-
   return 'swap-ready'
 }
 
