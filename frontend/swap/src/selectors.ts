@@ -7,6 +7,7 @@
  * Spec: IMPL guide §3.8 (mode block), §3.9 (action button states).
  */
 import type { ActionState, ModeBlock } from '@/types'
+import { TERMINAL_STATUSES } from '@/lib/orderStatus'
 
 // Minimal slice of the store we need. Avoids importing the store type to
 // keep selectors usable with synthetic test fixtures.
@@ -31,7 +32,10 @@ interface SelectableState {
   bittensorProxySetup: boolean
 }
 
-const TERMINAL_ORDER_STATUSES = new Set(['filled', 'failed', 'cancelled'])
+// Imported from @/lib/orderStatus so this list stays in lockstep with the
+// subnet's OrderStatus enum — earlier this only included three statuses
+// and rejected/expired/bridge_failed orders left the action button stuck.
+const TERMINAL_ORDER_STATUSES = TERMINAL_STATUSES
 
 export function selectActionState(s: SelectableState): ActionState {
   if (!s.walletConnected) return 'disconnected'

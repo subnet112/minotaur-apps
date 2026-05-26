@@ -14,29 +14,11 @@
  */
 import BracketCorners from '@/components/primitives/BracketCorners'
 import { useToast } from '@/components/shell'
-import type { OrderStep } from '@/types'
-
-const STEPS: ReadonlyArray<Exclude<OrderStep, 'failed'>> = [
-  'pending',
-  'open',
-  'solved',
-  'scored',
-  'consensus',
-  'filled',
-]
-
-const STEP_LABELS: Record<Exclude<OrderStep, 'failed'>, string> = {
-  pending: 'Pending',
-  open: 'Open',
-  solved: 'Solved',
-  scored: 'Scored',
-  consensus: 'Consensus',
-  filled: 'Filled',
-}
+import { STEPS, STEP_LABELS, classifyOrderStatus } from '@/lib/orderStatus'
 
 export interface OrderStatusCardProps {
-  /** Current step from store.activeOrder.status */
-  step: OrderStep
+  /** Current status from store.activeOrder.status (raw API string). */
+  step: string
   /** store.activeOrder.order_id */
   orderId: string
   /** store.activeOrder.tx_hash */
@@ -51,6 +33,8 @@ export interface OrderStatusCardProps {
   fee?: string
   /** store.executionDetails.gasUsed (formatted string) */
   gas?: string
+  /** store.activeOrder.error — surfaced verbatim when isFailed. */
+  errorMessage?: string
   /** CHAIN_CONFIG[chainId].explorer */
   explorerBaseUrl?: string
   onNewSwap: () => void
@@ -65,17 +49,20 @@ export default function OrderStatusCard({
   surplus,
   fee,
   gas,
+  errorMessage,
   explorerBaseUrl = '',
   onNewSwap,
 }: OrderStatusCardProps) {
   const toast = useToast()
-  const isFailed = step === 'failed'
 
-  // Map step → index into STEPS array
-  // For 'failed', treat as if stopped at 'open' (idx 1) per prototype v4
-  const currentIdx = isFailed ? 1 : STEPS.indexOf(step as Exclude<OrderStep, 'failed'>)
+  // classifyOrderStatus owns the full mapping (subnet OrderStatus enum →
+  // step index + flags). Treat any failure-class status as is-failed; treat
+  // any terminal status (filled or failed) as is-terminal for the action row.
+  const { stepIdx, isFailed, isFilled, isTerminal } = classifyOrderStatus(step)
 
-  const isTerminal = step === 'filled' || step === 'failed'
+  // For failed states, the prototype freezes the stepper at the 'open' node
+  // (idx 1) so the user can see "we got to open then something broke".
+  const currentIdx = isFailed ? 1 : stepIdx
 
   // Lime segment geometry. The 6 nodes sit at evenly-spaced positions
   // (12 columns, each node at 1/12 + idx*2/12 = 8.33% + idx*16.66%).
@@ -128,7 +115,12 @@ export default function OrderStatusCard({
           >
             {orderIdShort}
           </button>
-          {isTerminal && !isFailed && <span className="v">&nbsp;·&nbsp;filled</span>}
+          {/* Show the actual terminal status name — was hard-coded to
+              "filled" so rejected/cancelled/expired orders all read as
+              filled in the card header. */}
+          {isTerminal && (
+            <span className="v">&nbsp;·&nbsp;{step}</span>
+          )}
         </span>
       </div>
 
@@ -208,6 +200,29 @@ export default function OrderStatusCard({
               {showGas && gas ? gas : '—'}
             </span>
           </div>
+
+          {/* Surface the API's `error` field verbatim when the order failed.
+              The receipt page shows the same string; this gives the user
+              the reason in-place without leaving the swap surface. */}
+          {isFailed && errorMessage && (
+            <div className="row" style={{ alignItems: 'flex-start' }}>
+              <span className="k">Reason</span>
+              <span
+                className="v"
+                style={{
+                  color: 'var(--cretan, #ff5d4d)',
+                  fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+                  fontSize: 12,
+                  textAlign: 'right',
+                  maxWidth: '70%',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {errorMessage}
+              </span>
+            </div>
+          )}
         </div>
 
         {isTerminal && (

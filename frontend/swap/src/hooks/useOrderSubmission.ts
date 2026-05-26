@@ -3,6 +3,7 @@ import { useToast } from '@/components/shell'
 import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
 import { formatAmount, shorten } from '../utils'
+import { classifyOrderStatus } from '@/lib/orderStatus'
 import * as api from '@/api/client'
 
 /**
@@ -22,13 +23,16 @@ export function useOrderSubmission() {
         const status = await api.getOrderStatus(orderId)
         store.setActiveOrder(status)
 
-        const terminal = ['filled', 'failed', 'cancelled']
-        if (terminal.includes(status.status)) {
+        // Match the subnet's full OrderStatus enum — 'rejected' / 'expired'
+        // / 'bridge_failed' etc. were missing here, so polling never stopped
+        // and the failure toast never fired on real production rejections.
+        const { isFailed, isFilled, isTerminal } = classifyOrderStatus(status.status)
+        if (isTerminal) {
           clearInterval(pollRef.current!)
           pollRef.current = null
           store.setPolling(false)
 
-          if (status.status === 'filled') {
+          if (isFilled) {
             // One-shot toast for terminal filled state (separate from submit flow).
             // Use score as a proxy for surplus display — execution details may not
             // be available yet (they're fetched from the tx receipt below).
@@ -82,9 +86,19 @@ export function useOrderSubmission() {
                 }
               } catch (e) { console.warn('Failed to fetch execution details:', e) }
             }
-          } else if (status.status === 'failed') {
-            // One-shot toast for terminal failed state (separate from submit flow)
-            toast.error({ title: 'Order failed', message: 'Swap execution failed' })
+          } else if (isFailed) {
+            // One-shot toast for any terminal failure (rejected / failed /
+            // cancelled / expired / bridge_failed / rolled_back / partial_rollback).
+            // Surface the server's `error` field — it carries the actionable
+            // reason ("Relayer submission failed: invalid EIP-712 signature
+            // from 0x…", "deadline expired", etc). Falling back to a generic
+            // string only when the server didn't attach one.
+            const reason =
+              (status as Record<string, unknown>).error as string | undefined
+            toast.error({
+              title: `Order ${status.status}`,
+              message: reason || 'See order receipt for details',
+            })
           }
         }
       } catch {

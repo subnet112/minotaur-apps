@@ -19,7 +19,7 @@ import {
   mapExternalComparisonToCardRows,
   formatTokenAmount,
 } from './SwapPage.mappers'
-import type { Token, TokenDisplay, OrderStep } from '@/types'
+import type { Token, TokenDisplay } from '@/types'
 import { CHAIN_CONFIG } from '@/config/chains'
 
 import { useAppBootstrap } from '@/hooks/useAppBootstrap'
@@ -331,7 +331,7 @@ export default function SwapPage() {
 
           {activeOrder && (
             <OrderStatusCard
-              step={activeOrder.status as OrderStep}
+              step={activeOrder.status}
               orderId={activeOrder.order_id}
               txHash={activeOrder.tx_hash ?? undefined}
               score={activeOrder.score ?? undefined}
@@ -339,6 +339,7 @@ export default function SwapPage() {
               surplus={executionDetails?.surplus}
               fee={executionDetails?.fee}
               gas={executionDetails?.gasUsed}
+              errorMessage={(activeOrder as Record<string, unknown>).error as string | undefined}
               explorerBaseUrl={CHAIN_CONFIG[chainId]?.explorer ?? ''}
               onNewSwap={() => {
                 useSwapStore.getState().setActiveOrder(null)
