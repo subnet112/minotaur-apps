@@ -2,11 +2,30 @@
 
 **Last updated:** 2026-05-26
 **Branch:** `feat/dex-design-consolidation`
-**Remote:** pushed to `origin` (https://github.com/soundyogi/minotaur-apps)
+**Remote:** pushed to `origin` (https://github.com/soundyogi/minotaur-apps), NOT pushed to `upstream` (https://github.com/subnet112/minotaur-apps).
 **Open PR URL:** https://github.com/soundyogi/minotaur-apps/pull/new/feat/dex-design-consolidation (not yet opened)
-**Upstream:** `subnet112/minotaur-apps` (canonical repo, PR target eventually)
 
 This brief is the entry point for the next session. Read me first, then read the specs.
+
+## Roadmap (one-glance status)
+
+| Phase | What | Status |
+|---|---|---|
+| 0-13 | Consolidation: scaffold → port → tests → docs | ✅ done (21 commits) |
+| 12.5 | Hybrid rebase: 6 components rewritten with real store wiring | ✅ done (6 commits) |
+| 12.6 | Functional parity audit vs archive (21 gaps found, fixed) | ✅ done |
+| 12.7 | Open issues: chain picker, recipient MetaMask button, clear-history, visual baseline crop | ✅ done (3 commits) |
+| 12.8 | **Correctness fixes** (8 critical bugs + 12 should-fix) — F1 hook tests, F7-F8 abort/race, F12 quote refetch, F14-F15 balances, F19 history load, F21 native-input removal | 🟡 NEXT — spec drafted at `docs/superpowers/specs/2026-05-26-phase-12.8-correctness-fixes-spec.md` |
+| (later) | Contract upgrade — make `executeIntent` payable, add WETH wrapping (F21 long-term) | 🔵 deferred to contracts repo |
+| (later) | Design-pending: wallet menu, full chain picker, mobile responsive, etc. | 🔵 separate phase |
+| PR | Open PR to subnet112/minotaur-apps | 🟡 awaiting user (branch is on user's fork only) |
+
+## Backlog
+
+Tracked in `frontend/swap/KNOWN_ISSUES.md` — 35 items by severity:
+- 🔴 8 critical (Phase 12.8 closes these)
+- 🟡 12 should-fix
+- 🟢 15 future-work / design-pending
 
 ## TL;DR
 

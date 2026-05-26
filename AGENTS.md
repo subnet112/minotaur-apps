@@ -4,6 +4,21 @@ This file provides architectural guidance for AI coding agents working in this
 repository. Tool-agnostic — compatible with Anthropic's CLI, Codex, Cursor,
 and similar tools.
 
+## Pick-up references (read these first if starting a new session)
+
+- **`docs/superpowers/SESSION_BRIEF.md`** — current branch state, what's done, what's next, critical invariants. Read me first.
+- **`docs/superpowers/specs/`** — design specs (one per phase).
+- **`docs/superpowers/plans/`** — implementation plans.
+- **`frontend/swap/KNOWN_ISSUES.md`** — open bugs + gaps with fix IDs (F1, F7, F8, F12, F14, F15, F19, F21 etc). Updated as issues are found.
+- **Memory at `~/.claude/projects/-workspaces-minotaur-apps/memory/`** — durable facts that survive across sessions (OSS conventions, project-specific rules).
+
+If a session is starting cold (no recent context), follow this order:
+1. Read `SESSION_BRIEF.md`.
+2. Read `KNOWN_ISSUES.md`.
+3. Read the latest spec in `docs/superpowers/specs/`.
+4. Run the verify-state commands from the session brief.
+5. Then proceed.
+
 ## Repo purpose
 
 App Intent implementations for [Subnet 112 (Minotaur)](https://github.com/subnet112/minotaur_subnet). Each app is a Solidity contract that inherits the platform's `AppIntentBase` plus a JS scoring module that runs in the validator's V8 sandbox. The Bittensor subnet's Solving Engine handles execution; this repo defines *outcome + scoring*, not routing.

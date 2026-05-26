@@ -173,12 +173,25 @@ export function useOrderSubmission() {
 
       // NOTE: ERC-20 approval is handled by the ActionButton (Approve step).
 
+      // ⚠️ KNOWN-ISSUE F21 (see frontend/swap/KNOWN_ISSUES.md):
+      // This native-input branch is BROKEN on-chain as of 2026-05-26.
+      // executeIntent in AppIntentBase is not payable; DexAggregatorApp
+      // has zero IWETH.deposit() calls; msg.value==0 guards at
+      // DexAggregatorApp.sol:207,291 skip fee processing when msg.value > 0.
+      // TX will revert with "invalid callvalue" before any swap logic runs.
+      // Funds are NOT lost (TX never executes) but no swap happens.
+      //
+      // Phase 12.8 will remove this branch entirely. Users must wrap
+      // ETH → WETH manually until the contract gains payable + WETH-wrap
+      // support. Tracked in:
+      //   docs/superpowers/specs/2026-05-26-phase-12.8-correctness-fixes-spec.md (F21)
+      //
       // Native ETH/TAO input: mark the order for user-direct-submit. The
       // relayer can't pull msg.value from an external wallet, so for native
-      // input the user will send the executeIntent TX themselves (single
-      // MetaMask popup). The contract wraps msg.value → WETH atomically
-      // inside _fundAndExecute. For ERC-20 input, the standard relayer flow
-      // stays unchanged.
+      // input the user would send the executeIntent TX themselves (single
+      // MetaMask popup). The contract was supposed to wrap msg.value → WETH
+      // atomically inside _fundAndExecute, but never gained that code path.
+      // For ERC-20 input, the standard relayer flow stays unchanged.
       const isNativeInput = !!(
         store.walletMode === 'external' &&
         store.inputToken?.native &&
