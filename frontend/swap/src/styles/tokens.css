@@ -1,0 +1,233 @@
+/* =========================================================================
+   Minotaur Design System — Colors & Type
+   ========================================================================= */
+
+/* Webfonts ----------------------------------------------------------------- */
+/* Brand-supplied .ttf binaries used for both families. */
+
+@font-face {
+  font-family: 'Funnel Display';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('../fonts/FunnelDisplay-Light.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Funnel Display';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/FunnelDisplay-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Funnel Display';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/FunnelDisplay-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Funnel Display';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/FunnelDisplay-SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Funnel Display';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/FunnelDisplay-Bold.ttf') format('truetype');
+}
+/* Space Mono: brand-supplied .ttf binaries take priority. */
+@font-face {
+  font-family: 'Space Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/SpaceMono-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Space Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/SpaceMono-Bold.ttf') format('truetype');
+}
+
+:root {
+  /* ----- Onyx ramp (surfaces + text) --------------------------------------- */
+  --void:     #141414;
+  --onyx:     #242424;
+  --slate:    #2E2E2E;
+  --granite:  #3D3D3D;
+  --granite-2:#4A4A4A;
+  --stone:    #6A6A6A;
+  --mist:     #A8A8A8;
+  --bone:     #E8E8E8;
+  --bone-pure:#FFFFFF;
+
+  /* ----- Accents ---------------------------------------------------------- */
+  --lime:         #CBFD12;
+  --lime-hover:   #B1DF0E;
+  --lime-tint:    rgba(203, 253, 18, 0.12);
+  --lime-dim:     #5E6B19;
+
+  /* ----- Cretan Orange ramp (mythic accent — brand surfaces, editorial,
+     schematic. Never product UI chrome.) ----------------------------------- */
+  --cretan:        #DC5B1D;
+  --cretan-mid:    #9A3F12;
+  --cretan-deep:   #5C2509;
+
+  /* Legacy aliases — do not use in new work. */
+  --copper:        #DC5B1D;
+  --patina:        #9A3F12;
+  --shadow:        #5C2509;
+
+  /* ----- Semantic roles --------------------------------------------------- */
+  /* Surfaces */
+  --bg:             var(--onyx);
+  --bg-deep:        var(--void);
+  --bg-raised:      var(--slate);
+  --bg-overlay:     rgba(36, 36, 36, 0.92);
+
+  /* Foreground */
+  --fg-1:           var(--bone);     /* primary text */
+  --fg-2:           var(--mist);     /* secondary text */
+  --fg-3:           var(--stone);    /* disabled / tertiary */
+  --fg-accent:      var(--lime);     /* one per frame */
+  --fg-inverse:     var(--onyx);     /* text on Lime/Bone surfaces */
+
+  /* Lines */
+  --border:         var(--granite);
+  --border-strong:  var(--granite-2);
+  --border-focus:   var(--lime);
+  --divider:        var(--granite);
+
+  /* States */
+  --state-hover-bg: var(--slate);
+  --state-press-bg: var(--void);
+  --state-selected: var(--lime-tint);
+
+  /* ----- Type ------------------------------------------------------------- */
+  --display: 'Funnel Display', ui-sans-serif, system-ui, sans-serif;
+  --body:    'Funnel Display', ui-sans-serif, system-ui, sans-serif;
+  --mono:    'Space Mono', ui-monospace, 'Menlo', monospace;
+
+  /* Scale (px) — 4px base, display-driven */
+  --fs-eyebrow: 11px;
+  --fs-label:   12px;
+  --fs-meta:    13px;
+  --fs-body:    15px;
+  --fs-body-lg: 17px;
+  --fs-h4:      20px;
+  --fs-h3:      28px;
+  --fs-h2:      40px;
+  --fs-h1:      64px;
+  --fs-display: 96px;
+
+  /* Line heights */
+  --lh-tight: 1.05;
+  --lh-snug:  1.2;
+  --lh-body:  1.5;
+  --lh-loose: 1.65;
+
+  /* Tracking */
+  --tr-eyebrow: 0.12em;
+  --tr-display: -0.02em;
+  --tr-body:    0;
+
+  /* ----- Spacing (4px base) ---------------------------------------------- */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  24px;
+  --sp-6:  32px;
+  --sp-7:  48px;
+  --sp-8:  64px;
+  --sp-9:  96px;
+  --sp-10: 128px;
+
+  /* ----- Radius --------------------------------------------------------- */
+  --r-tight: 4px;
+  --r-base:  6px;
+  --r-card:  8px;
+
+  /* ----- Motion --------------------------------------------------------- */
+  --ease:    cubic-bezier(0.2, 0, 0, 1);
+  --dur-micro: 120ms;
+  --dur-state: 200ms;
+  --dur-enter: 320ms;
+}
+
+/* Semantic element defaults ----------------------------------------------- */
+html, body {
+  background: var(--bg);
+  color: var(--fg-1);
+  font-family: var(--body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  letter-spacing: var(--tr-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--display);
+  font-weight: 400;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tr-display);
+  color: var(--fg-1);
+  margin: 0;
+}
+h1 { font-size: var(--fs-h1); font-weight: 400; }
+h2 { font-size: var(--fs-h2); font-weight: 400; }
+h3 { font-size: var(--fs-h3); font-weight: 400; line-height: var(--lh-snug); }
+h4 { font-size: var(--fs-h4); font-weight: 400; line-height: var(--lh-snug); }
+
+p { margin: 0; color: var(--fg-1); }
+.p-2 { color: var(--fg-2); }
+
+.eyebrow,
+.label,
+.meta {
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: var(--tr-eyebrow);
+  color: var(--fg-2);
+  font-weight: 400;
+}
+.eyebrow { font-size: var(--fs-eyebrow); }
+.label   { font-size: var(--fs-label); }
+.meta    { font-size: var(--fs-meta); text-transform: none; letter-spacing: 0; color: var(--fg-2); }
+
+code, pre, .mono {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+a {
+  color: var(--fg-1);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-strong);
+  transition: color var(--dur-micro) var(--ease), border-color var(--dur-micro) var(--ease);
+}
+a:hover { color: var(--lime); border-color: var(--lime); }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--divider);
+  margin: var(--sp-6) 0;
+}
+
+::selection { background: var(--lime-tint); color: var(--bone); }
+
+button, input, textarea, select { font-family: inherit; font-size: inherit; }
+
+/* Focus ring — outline, not shadow */
+:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: 2px;
+}

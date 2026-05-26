@@ -18,3 +18,22 @@ broadcast/
 node_modules/
 dist/
 build/
+
+# Local agent tooling (not part of the project)
+pagewire-main/
+pagewire-main.zip
+
+# Designer reference tree (unzip locally to re-capture visual baselines).
+# Visual baselines themselves (PNGs) live committed at
+# frontend/swap/tests/visual/baseline/ — no need to ship the source tree.
+design/
+
+# Agent harness internals (worktrees, tasks, etc.) — never part of the project.
+.claude/
+
+# Agent-driven development scratch (specs, plans, design docs from internal
+# tooling). Useful locally for context but not part of the OSS surface.
+docs/superpowers/
+
+# TypeScript incremental build state
+*.tsbuildinfo

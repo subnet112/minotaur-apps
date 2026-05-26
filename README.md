@@ -8,83 +8,71 @@ App Intent implementations for [Subnet 112 (Minotaur)](https://github.com/subnet
 
 Each app defines an **outcome + scoring**. The network's Solving Engine (run by miners, validated by the subnet) figures out optimal execution.
 
+## What's in this repo
+
+| Path | Purpose |
+|---|---|
+| `contracts/src/` | Production Solidity App contracts (currently `DexAggregatorApp.sol`). Inherit `AppIntentBase` from the `minotaur_contracts` submodule. |
+| `contracts/scoring/` | JS scoring modules paired 1:1 with each contract. Run in the validator's V8 sandbox. |
+| `contracts/draft/` | Staging area for new apps (DCA, PortfolioRebalancer, YieldOptimizer, LPOptimizer). Not in foundry's build path. |
+| `contracts/test/` + `contracts/script/` | Foundry tests + deploy scripts. |
+| `frontend/swap/` | **Standalone DEX swap app** — Vite + React reference implementation for `DexAggregatorApp`. See [`frontend/swap/README.md`](frontend/swap/README.md). |
+| `archive/` | Retired code, kept for reference until shipped. |
+| `lib/minotaur_contracts/` | Platform contracts (`AppIntentBase`, `EphemeralProxy`, validator quorum) as a git submodule. |
+
 ## Apps
 
-| App | Contract | Description |
-|-----|----------|-------------|
-| **DexAggregator** | `DexAggregatorApp.sol` | Multi-DEX token swaps with positive-slippage fee capture. Single-allowance flow — fee comes out of the swap output, never from a separate user pull. |
-| **DCA** | `DCAApp.sol` | Dollar-cost averaging with a deposit model. Users pre-fund the contract, no per-execution approvals. |
-| **PortfolioRebalancer** | `PortfolioRebalancerApp.sol` | Drift-based portfolio rebalancing. |
-| **YieldOptimizer** | `YieldOptimizerApp.sol` | Aave V3 / Compound V3 yield optimisation. |
-| **LPOptimizer** | `LPOptimizerApp.sol` | Liquidity-position optimisation. |
+| App | Status | Contract | Description |
+|---|---|---|---|
+| **DexAggregator** | Production | `DexAggregatorApp.sol` | Multi-DEX token swaps with positive-slippage fee capture. Single-allowance flow — fee comes out of the swap output, never from a separate user pull. |
+| DCA | Draft | `DCAApp.sol` | Dollar-cost averaging with a deposit model. Users pre-fund the contract; no per-execution approvals. |
+| PortfolioRebalancer | Draft | `PortfolioRebalancerApp.sol` | Drift-based portfolio rebalancing. |
+| YieldOptimizer | Draft | `YieldOptimizerApp.sol` | Aave V3 / Compound V3 yield optimisation. |
+| LPOptimizer | Draft | `LPOptimizerApp.sol` | Liquidity-position optimisation. |
 
-## Repository structure
-
-```
-contracts/
-├── src/           App Solidity contracts (inherit AppIntentBase
-│                  from subnet112/minotaur_contracts)
-├── scoring/       JS scoring modules (deployed via the API's
-│                  /v1/apps endpoint alongside the contract)
-├── script/        Foundry deploy scripts
-└── test/          Foundry tests
-frontend/
-└── swap/          DexAggregator swap UI (React) — consumed by
-                   the user-facing mainapp via git submodule
-```
-
-### Frontend consumption model
-
-`frontend/swap/` is **not a standalone npm package**. The TypeScript modules
-import from path-aliased locations like `@/config/chains` and `@/api/client`
-that resolve only inside the host application's `tsconfig` — the user-facing
-mainapp consumes this directory as a git submodule and provides those aliases
-through its own build.
-
-If you want to use these components in a different host app, vendor the
-directory and re-point the imports at your own chain config + API client. The
-files are otherwise framework-agnostic React + TanStack Query + zustand and
-have no other private dependencies.
-
-## Building
+## Contracts — quickstart
 
 ```bash
-# Install platform contracts (provides AppIntentBase) as a Foundry dependency
-forge install subnet112/minotaur_contracts
-
-# Build the app contracts
+git submodule update --init --recursive
 forge build
-
-# Run tests
 forge test -v
+forge test --match-contract DexAggregatorTest -vvv   # one suite
 ```
 
-## Deploying an app
+Solidity 0.8.24, optimizer 200 runs, `via_ir = true`. Remappings live in `foundry.toml`.
 
-App contracts are deployed permissionlessly through the validator API rather
-than directly via `forge create`. The submission flow is documented in the
-[main subnet repo](https://github.com/subnet112/minotaur_subnet) under
-`docs/`. In short:
+## Frontend (DEX swap UI) — quickstart
 
-1. POST the contract source + JS scoring module to `/v1/apps/`
-2. POST `/v1/apps/{app_id}/deploy?chain_id=…` to compile + deploy
-3. POST `/v1/apps/{app_id}/activate` to make it queryable for users
+```bash
+cd frontend/swap
+pnpm install
+pnpm dev      # http://localhost:5173/swap
+```
 
-The relayer pays gas. Developers pay zero on-chain cost to deploy.
+Requires Node 20+, pnpm 10. Default API endpoint is `https://api.minotaursubnet.com`; override with `VITE_API_URL` in `.env.local`. See [`frontend/swap/README.md`](frontend/swap/README.md) for the architecture, scripts, and testing approach.
 
 ## Adding a new app
 
-A new App is just two files under `contracts/`:
+A new App is two files under `contracts/`:
 
-- `contracts/src/YourApp.sol` — Solidity contract inheriting `AppIntentBase`,
-  declaring intent functions (e.g. `swap`, `bridge`, `rebalance`) and
-  exposing `scoreIntent` for off-chain simulation.
-- `contracts/scoring/your_app_scoring.js` — JS module exporting a
-  `score(plan, state, context)` function that runs in the validator's
-  V8 sandbox after on-chain simulation.
+- `contracts/src/YourApp.sol` — Solidity contract inheriting `AppIntentBase`, declaring intent functions (e.g. `swap`, `bridge`, `rebalance`), exposing `scoreIntent` for off-chain simulation.
+- `contracts/scoring/your_app_scoring.js` — JS module exporting a `score(plan, state, context)` function that runs in the validator's V8 sandbox after on-chain simulation.
 
-Both files together fully describe the app's outcome + scoring. The Solving
-Engine handles execution.
+Plus a deploy script in `contracts/script/` and tests in `contracts/test/`. See `DexAggregatorApp` for the reference pattern.
+
+## Deploying an app
+
+App contracts deploy permissionlessly through the validator API rather than directly via `forge create`. The flow:
+
+1. POST contract source + scoring module to `/v1/apps/`.
+2. POST `/v1/apps/{app_id}/deploy?chain_id=…` to compile + deploy.
+3. POST `/v1/apps/{app_id}/activate` to make it queryable for users.
+
+The relayer pays gas. Developers pay zero on-chain cost to deploy.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## License
 
