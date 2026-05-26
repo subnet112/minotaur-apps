@@ -334,7 +334,13 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   loadHistory: () => {
     try {
       const saved = localStorage.getItem('minotaur_swap_history')
-      if (saved) set({ recentSwaps: JSON.parse(saved).slice(0, 10) })
+      if (!saved) return
+      const items = JSON.parse(saved).slice(0, 10)
+      // Auto-open the Recent Swaps panel on boot whenever the user has at
+      // least one persisted swap — they came back to see their history,
+      // make it visible without an extra click. The header icon still
+      // toggles it closed if they prefer the focused single-card layout.
+      set({ recentSwaps: items, showHistory: items.length > 0 })
     } catch {
       /* ignore */
     }
