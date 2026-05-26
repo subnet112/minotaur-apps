@@ -1,5 +1,6 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef } from 'react'
 import { useSwapStore } from '../store'
+import { useToast } from '@/components/shell'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
 import { parseAmount } from '../utils'
 import * as api from '@/api/client'
@@ -10,6 +11,9 @@ import * as api from '@/api/client'
  */
 export function useQuoteRequest() {
   const store = useSwapStore()
+  const toast = useToast()
+  // F8: version counter — ignores stale responses when inputs change mid-flight
+  const versionRef = useRef<number>(0)
 
   const requestQuote = useCallback(async () => {
     const addr = store.getActiveAddress()
@@ -19,6 +23,13 @@ export function useQuoteRequest() {
     store.setError(null)
     // Don't clear the old quote — keep it visible while the new one loads.
     // This prevents layout shift during quote refresh.
+
+    // F8: increment version and capture local snapshot
+    const myVersion = ++versionRef.current
+
+    // F7: AbortController for this invocation
+    const controller = new AbortController()
+    const { signal } = controller
 
     try {
       const inputAmountWei = parseAmount(store.inputAmount, store.inputToken.decimals)
@@ -59,6 +70,7 @@ export function useQuoteRequest() {
             const simRes = await fetch('/api/v1/native-bittensor/sim-swap', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
+              signal,
               body: JSON.stringify({
                 origin_netuid: originNetuid,
                 destination_netuid: destNetuid,
@@ -72,6 +84,9 @@ export function useQuoteRequest() {
               console.log('[BT] estimatedOutput:', estimatedOutput)
             }
           } catch (e) { console.error('[BT] sim_swap failed:', e) }
+
+          // F8: skip stale response
+          if (versionRef.current !== myVersion) return
 
           store.setQuote({
             app_id: store.appId,
@@ -101,12 +116,16 @@ export function useQuoteRequest() {
               store.setError('Connect MetaMask or paste an EVM address for the destination')
               return
             }
+
+            // F8: skip stale response
+            if (versionRef.current !== myVersion) return
+
             store.setQuote({
               app_id: store.appId,
               estimated_output: '0',
               suggested_min_output: '0',
               slippage_bps: 50,
-              route_summary: `Alpha (SN${alphaMatch[1]}) \u2192 unstake \u2192 bridge \u2192 ${store.outputToken?.symbol || 'EVM token'}`,
+              route_summary: `Alpha (SN${alphaMatch[1]}) → unstake → bridge → ${store.outputToken?.symbol || 'EVM token'}`,
               gas_estimate: 0,
               valid_for_seconds: 300,
               chain_id: store.chainId,
@@ -138,12 +157,19 @@ export function useQuoteRequest() {
         intentFunction: 'swap',
         chainId: quoteChainId,
         slippageBps: store.slippageBps,
+        signal,
       })
+
+      // F8: discard if a newer request has been issued
+      if (versionRef.current !== myVersion) return
 
       console.log('[swap] raw quote response:', JSON.stringify(quote))
       store.setQuote(quote)
     } catch (e) {
-      store.setError((e as Error).message)
+      if (signal.aborted) return
+      const msg = (e as Error).message
+      store.setError(msg)
+      toast.error({ title: 'Quote unavailable', message: msg })
     } finally {
       store.setLoading(false)
     }
@@ -161,8 +187,13 @@ export function useQuoteRequest() {
     const numAmount = parseFloat(store.inputAmount)
     if (isNaN(numAmount) || numAmount <= 0) return
 
+    // F7: AbortController for the debounced window; clears on re-render before timeout fires
+    const controller = new AbortController()
     const timeoutId = setTimeout(() => { requestQuote() }, 600)
-    return () => clearTimeout(timeoutId)
+    return () => {
+      clearTimeout(timeoutId)
+      controller.abort()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.inputToken, store.outputToken, store.inputAmount, store.walletAddress, store.managedWallet, store.chainId, store.appId])
 

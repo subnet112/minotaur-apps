@@ -20,7 +20,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
     throw new ApiError(res.status, body.detail ?? body.error ?? JSON.stringify(body))
   }
-  return res.json()
+  const data = await res.json()
+  // Validator API returns HTTP 200 with { "error": "..." } on failures.
+  if (data && typeof data === 'object' && 'error' in data && data.error) {
+    throw new ApiError(200, String(data.error))
+  }
+  return data as T
 }
 
 export class ApiError extends Error {
@@ -210,10 +215,11 @@ export interface QuoteResult {
 export function getQuote(
   appId: string,
   params: Record<string, unknown>,
-  opts?: { intentFunction?: string; chainId?: number; slippageBps?: number },
+  opts?: { intentFunction?: string; chainId?: number; slippageBps?: number; signal?: AbortSignal },
 ): Promise<QuoteResult> {
   return request(`/v1/apps/${encodeURIComponent(appId)}/quote`, {
     method: 'POST',
+    signal: opts?.signal,
     body: JSON.stringify({
       params,
       intent_function: opts?.intentFunction ?? 'execute',
@@ -376,8 +382,8 @@ export interface BalancesResult {
   [k: string]: unknown
 }
 
-export function getWalletBalances(address: string, chainId: number = DEFAULT_CHAIN_ID): Promise<BalancesResult> {
-  return request(`/v1/wallets/${encodeURIComponent(address)}/balances?chain_id=${chainId}`)
+export function getWalletBalances(address: string, chainId: number = DEFAULT_CHAIN_ID, signal?: AbortSignal): Promise<BalancesResult> {
+  return request(`/v1/wallets/${encodeURIComponent(address)}/balances?chain_id=${chainId}`, { signal })
 }
 
 // ── Testnet Faucet ───────────────────────────────────────────────────────────
