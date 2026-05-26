@@ -77,9 +77,12 @@ export interface QuoteDisplay {
   feeUsd: string
   routeSummary: string
   comparison: ReadonlyArray<{
-    dex: 'Uniswap' | 'Curve' | 'Balancer'
+    /** Display name for the source (e.g. 'CoW Swap', 'Paraswap', 'Uniswap'). */
+    dex: string
     glyph: string
-    iconClass: 'uni' | 'crv' | 'bal'
+    /** CSS class for the `.mark` badge color. Design ships `.uni`/`.crv`/`.bal`; unknown values render with the default badge color. */
+    iconClass: string
+    /** Human-readable output amount in destination token units. */
     outAmount: string
     deltaPct: string
     deltaDir: 'down' | 'up' | 'none'

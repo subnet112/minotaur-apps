@@ -16,6 +16,7 @@ import {
   mapStoreToSwapFormProps,
   mapQuoteResultToQuoteCardProps,
   mapSolverTokensToDisplay,
+  mapExternalComparisonToCardRows,
   formatTokenAmount,
 } from './SwapPage.mappers'
 import type { Token, TokenDisplay, OrderStep } from '@/types'
@@ -31,6 +32,7 @@ import { useWalletBalances } from '@/hooks/useWalletBalances'
 import { useQuoteRequest } from '@/hooks/useQuoteRequest'
 import { useQuoteExpiry } from '@/hooks/useQuoteExpiry'
 import { useOrderSubmission } from '@/hooks/useOrderSubmission'
+import { useComparisonQuotes } from '@/hooks/useComparisonQuotes'
 
 import AppPageHeader from '@/components/dex-aggregator/AppPageHeader'
 import WalletButton from '@/components/dex-aggregator/WalletButton'
@@ -93,6 +95,8 @@ export default function SwapPage() {
 
   const { submitSwap } = useOrderSubmission()
   const wallet = useWalletConnection()
+  // External CoW Swap + Paraswap quotes for the QuoteCard's comparison panel.
+  const externalQuotes = useComparisonQuotes()
 
   // Read slices from store
   const walletMode = useSwapStore((s) => s.walletMode)
@@ -299,13 +303,23 @@ export default function SwapPage() {
 
           {quote && !activeOrder && inputToken && outputToken && (
             <QuoteCard
-              quote={mapQuoteResultToQuoteCardProps(
-                quote,
-                inputToken,
-                outputToken,
-                inputAmount,
-                quoteExpiry ?? 0,
-              )}
+              quote={{
+                ...mapQuoteResultToQuoteCardProps(
+                  quote,
+                  inputToken,
+                  outputToken,
+                  inputAmount,
+                  quoteExpiry ?? 0,
+                ),
+                // Overlay the QuoteResult.comparison_quotes (currently unset
+                // by the API) with the CoW Swap + Paraswap rows the
+                // useComparisonQuotes hook fetched against their public APIs.
+                comparison: mapExternalComparisonToCardRows(
+                  externalQuotes,
+                  quote.estimated_output,
+                  outputToken.decimals,
+                ),
+              }}
             />
           )}
 

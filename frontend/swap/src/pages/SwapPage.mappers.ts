@@ -196,10 +196,75 @@ export function mapQuoteResultToQuoteCardProps(
 }
 
 /** Glyph + icon class lookup for known external DEX names. */
-const DEX_META: Record<string, { glyph: string; iconClass: 'uni' | 'crv' | 'bal' }> = {
-  Uniswap: { glyph: 'U', iconClass: 'uni' },
-  Curve:   { glyph: 'C', iconClass: 'crv' },
-  Balancer: { glyph: 'B', iconClass: 'bal' },
+const DEX_META: Record<string, { glyph: string; iconClass: string }> = {
+  Uniswap:    { glyph: 'U', iconClass: 'uni' },
+  Curve:      { glyph: 'C', iconClass: 'crv' },
+  Balancer:   { glyph: 'B', iconClass: 'bal' },
+  'CoW Swap': { glyph: 'C', iconClass: 'crv' },
+  Paraswap:   { glyph: 'P', iconClass: 'uni' },
+}
+
+/**
+ * Convert the array returned by `useComparisonQuotes()` (CoW Swap +
+ * Paraswap public-API quotes) into QuoteDisplay.comparison rows. Computes
+ * delta-vs-Minotaur and marks the best row (highest output across
+ * Minotaur + the successful external quotes).
+ *
+ * - Loading rows render with outAmount='…' and delta='—'.
+ * - Error/unsupported rows render with outAmount='—' and the API error in deltaPct.
+ * - Success rows compute delta from raw integers (same destination decimals).
+ */
+export function mapExternalComparisonToCardRows(
+  externals: Array<{ protocol: string; output: string; outputFormatted: string; status: string; error?: string }>,
+  minotaurOutputRaw: string,
+  outputDecimals: number,
+): QuoteDisplay['comparison'] {
+  if (!externals || externals.length === 0) return []
+
+  // Best output across Minotaur + each successful external quote, raw int.
+  let bestRaw: bigint
+  try {
+    bestRaw = BigInt(minotaurOutputRaw || '0')
+  } catch {
+    bestRaw = 0n
+  }
+  for (const ext of externals) {
+    if (ext.status === 'success') {
+      try { const v = BigInt(ext.output); if (v > bestRaw) bestRaw = v } catch { /* skip */ }
+    }
+  }
+
+  return externals.map((ext) => {
+    const meta = DEX_META[ext.protocol] ?? { glyph: ext.protocol.charAt(0).toUpperCase(), iconClass: 'unknown' }
+
+    if (ext.status === 'loading') {
+      return { dex: ext.protocol, glyph: meta.glyph, iconClass: meta.iconClass, outAmount: '…', deltaPct: '—', deltaDir: 'none' as const, isBest: false }
+    }
+    if (ext.status === 'error' || ext.status === 'unsupported') {
+      return { dex: ext.protocol, glyph: meta.glyph, iconClass: meta.iconClass, outAmount: '—', deltaPct: ext.error ?? ext.status, deltaDir: 'none' as const, isBest: false }
+    }
+
+    // success
+    let theirs: bigint = 0n
+    let mino: bigint = 0n
+    try { theirs = BigInt(ext.output) } catch { /* keep 0 */ }
+    try { mino = BigInt(minotaurOutputRaw || '0') } catch { /* keep 0 */ }
+
+    let deltaPct = '0.00 %'
+    let deltaDir: 'up' | 'down' | 'none' = 'none'
+    if (mino > 0n) {
+      // signed pct = (theirs - mino) * 10000 / mino, integer math; convert to percent string.
+      const diffBps = (theirs - mino) * 10000n / mino
+      const abs = diffBps < 0n ? -diffBps : diffBps
+      const pct = (Number(abs) / 100).toFixed(2)
+      deltaPct = `${pct} %`
+      deltaDir = diffBps > 0n ? 'up' : diffBps < 0n ? 'down' : 'none'
+    }
+
+    const outAmount = formatTokenAmount(ext.output, outputDecimals)
+    const isBest = theirs > 0n && theirs >= bestRaw
+    return { dex: ext.protocol, glyph: meta.glyph, iconClass: meta.iconClass, outAmount, deltaPct, deltaDir, isBest }
+  })
 }
 
 /**
