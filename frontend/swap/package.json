@@ -1,0 +1,47 @@
+{
+  "name": "@minotaur/swap",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Minotaur DEX swap UI — single-allowance multi-DEX aggregation with positive-slippage fee capture. Functional reference implementation for the DexAggregatorApp intent (subnet112).",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "test": "pnpm run test:unit",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:e2e": "bash tests/e2e/swap-happy-path.sh && bash tests/e2e/wallet-modes.sh && bash tests/e2e/cross-chain.sh",
+    "test:visual": "bash tests/visual/diff.sh",
+    "snapshot:baseline": "bash tests/visual/capture-baseline.sh",
+    "snapshot:current": "bash tests/visual/capture-current.sh"
+  },
+  "dependencies": {
+    "@polkadot/api": "^15.0.0",
+    "ethers": "^6.13.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.1.1",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.5.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "^18.3.22",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/ui": "^2.1.0",
+    "jsdom": "^25.0.0",
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "typescript": "~5.8.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.0"
+  }
+}

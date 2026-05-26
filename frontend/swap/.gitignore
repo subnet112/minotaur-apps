@@ -1,0 +1,23 @@
+# Vite + Node
+node_modules/
+dist/
+.vite/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Test output
+tests/visual/current/
+tests/visual/diff/
+coverage/
+.vitest-cache/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
