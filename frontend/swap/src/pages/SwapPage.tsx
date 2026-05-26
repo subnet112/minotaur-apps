@@ -33,6 +33,7 @@ import { useQuoteRequest } from '@/hooks/useQuoteRequest'
 import { useQuoteExpiry } from '@/hooks/useQuoteExpiry'
 import { useOrderSubmission } from '@/hooks/useOrderSubmission'
 import { useComparisonQuotes } from '@/hooks/useComparisonQuotes'
+import { useApproval } from '@/hooks/useApproval'
 
 import AppPageHeader from '@/components/dex-aggregator/AppPageHeader'
 import WalletButton from '@/components/dex-aggregator/WalletButton'
@@ -97,6 +98,8 @@ export default function SwapPage() {
   const wallet = useWalletConnection()
   // External CoW Swap + Paraswap quotes for the QuoteCard's comparison panel.
   const externalQuotes = useComparisonQuotes()
+  // ERC-20 approval flow: refreshes needsApproval and exposes the approve TX.
+  const { approve } = useApproval()
 
   // Read slices from store
   const walletMode = useSwapStore((s) => s.walletMode)
@@ -246,7 +249,10 @@ export default function SwapPage() {
         <div className="dex-content">
           {modeBlockVariant && (
             <div className="sw-stack">
-              <WalletModeBlock variant={modeBlockVariant} />
+              <WalletModeBlock
+                variant={modeBlockVariant}
+                onCtaClick={modeBlockVariant === 'approval' ? approve : undefined}
+              />
             </div>
           )}
 
