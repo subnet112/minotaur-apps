@@ -79,11 +79,11 @@ describe('selectActionState', () => {
     expect(selectActionState(s)).toBe('no-route')
   })
 
-  it('returns "approving" when needsApproval and not yet approving', () => {
+  it('returns "awaiting-sig" when needsApproval and not yet approving (approval CTA lives in WalletModeBlock)', () => {
     const s = { ...baseState(), walletConnected: true, walletMode: 'external', walletChainId: 1,
                 inputAmount: '10', inputBalance: '100',
                 quote: {} as any, needsApproval: true, approving: false }
-    expect(selectActionState(s)).toBe('approving')
+    expect(selectActionState(s)).toBe('awaiting-sig')
   })
 
   it('returns "approving" when approving is true', () => {

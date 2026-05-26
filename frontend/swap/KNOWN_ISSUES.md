@@ -14,135 +14,25 @@ Tracked correctness gaps and incomplete behavior in `frontend/swap/`. Maintained
 
 ## 🔴 Critical
 
-### F1 — Zero hook unit tests
-
-**Status:** Open. Phase 12.8 will add ~150 test cases.
-
-**Where:** No tests at `src/hooks/*.test.ts`. All 7 hooks (`useAppBootstrap`, `useMetaMaskListener`, `useWalletBalances`, `useQuoteRequest`, `useQuoteExpiry`, `useWalletConnection`, `useOrderSubmission`) — ~1,200 LOC of side effects — have no unit coverage.
-
-**Impact:** Bugs in debouncing, abort handling, error paths, polling cleanup, race conditions can land unnoticed. Current `54/54 tests pass` is misleading — pure functions only.
-
-**Fix:** Add `tests/unit/hooks/` with one file per hook. Decide mock strategy in Phase 12.8 brainstorm (MSW vs manual; `renderHook` vs wrapper component; how to mock `window.ethereum`).
-
-### F7 — No AbortController on quote / balance fetches
-
-**Status:** Open.
-
-**Where:** `src/hooks/useQuoteRequest.ts`, `src/hooks/useWalletBalances.ts`.
-
-**Impact:** Rapid input changes spawn parallel fetches; stale responses can overwrite newer ones. Wasted network traffic. Slow / flaky networks can produce wrong UI.
-
-**Fix:** Wrap fetches in `AbortController`; abort on dep change.
-
-### F8 — Stale quote response can overwrite newer result
-
-**Status:** Open.
-
-**Where:** `src/hooks/useQuoteRequest.ts`.
-
-**Impact:** Even with debounce, if request N's response arrives after N+1's, N's quote is stored. User sees the wrong quote for their current input.
-
-**Fix:** Add a request-version counter; ignore responses for stale versions.
-
-### F12 — Quote does not auto-refetch on TTL expiry
-
-**Status:** Open.
-
-**Where:** `src/hooks/useQuoteExpiry.ts`.
-
-**Impact:** When `quoteExpiry` reaches zero, the visual countdown completes but no new quote is fetched. User sees a stale-but-displayed quote indefinitely.
-
-**Fix:** Accept `requestQuote` callback in `useQuoteExpiry`; call it on expiry (gated to not fire while an order is active).
-
-**IMPL guide reference:** §3.7 — "On expiry: trigger refetch, reset bar."
-
-### F14 — Bittensor balance fetch likely broken (SS58 vs hex)
-
-**Status:** Open. Requires empirical API check.
-
-**Where:** `src/hooks/useWalletBalances.ts`. The hook calls `api.getWalletBalances(addr, chainId)` with the wallet's primary address. For Bittensor wallets, `addr` is an SS58 string (e.g. `5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY`).
-
-**Impact:** Unverified whether the validator API at `api.minotaursubnet.com/v1/wallets/{addr}/balances` accepts SS58 addresses. If it expects only hex EVM addresses, Bittensor users see no balance.
-
-**Fix:** Phase 12.8 will empirically test the API (`curl` against the public endpoint with each address format). Based on findings: either route through a separate Bittensor balance endpoint or convert/encode.
-
-### F15 — Cross-chain swap fetches wrong-chain balance
-
-**Status:** Open.
-
-**Where:** `src/hooks/useWalletBalances.ts`. Hook fetches balances for `chainId` (the destination chain) instead of `sourceChainId` (where the FROM token actually lives) when `isCrossChain` is true.
-
-**Impact:** Cross-chain Bittensor → EVM swap: FROM balance shows the user's Ethereum balance instead of their Bittensor TAO balance. Wrong "Insufficient balance" or stale value.
-
-**Fix:** When `isCrossChain`, fetch FROM balance from `sourceChainId`, TO balance from `chainId`.
-
-### F19 — Recent-swaps history not loaded on app start
-
-**Status:** Open. One-line fix.
-
-**Where:** `src/hooks/useAppBootstrap.ts`. The hook handles solver tokens + app/contract discovery but never calls `store.loadHistory()`.
-
-**Impact:** localStorage round-trip is broken. History is always empty at app start. Only new swaps submitted in the current session appear in the RevealPanel history view.
-
-**Fix:** Add `store.loadHistory()` to `useAppBootstrap`'s mount effect.
-
----
+_All Phase 12.8 critical items resolved. See **Resolved** below._
 
 ## 🟡 Important
 
-### F2 — Selector edge cases untested
-
-`selectActionState` and `selectModeBlockVariant` cover the main 12+7 states but have no tests for:
-- `walletChainId === null` (still external mode, no chain yet)
-- `walletConnected=true && walletAddress=''`
-- Simultaneous `needsApproval && approving`
-- `quote != null && inputAmount === ''`
-
-Fix: add `tests/unit/selectors-edge.test.ts` (~50 cases).
-
-### F3 — Missing E2E flows
-
-Current pagewire E2E: `swap-happy-path.sh`, `wallet-modes.sh`, `cross-chain.sh`. Missing: approval flow, order failure, settings persistence, history persistence, custom token import. Fix: add 4 new shell scripts.
-
-### F4 — `.sw-slip.is-custom` modifier never applied
-
-When user enters a non-preset slippage, the design's CSS expects `.sw-slip.is-custom` (lime tint + cretan glyph). Component leaves the chip Mist always. One-liner fix in `SettingsSheet.tsx`.
-
-### F5 — `.sw-cmp-row.is-best` never applied
-
-When a comparison DEX beats Minotaur on output, the design's `.sw-cmp-row.is-best` modifier (lime-tinted row + check glyph) never renders. Mappers don't track which result is best. Fix: in `mapQuoteResultToQuoteCardProps`, compute `bestIdx` and flag the winning comparison row.
-
-### F6 — TokenSelectorModal disabled rows still clickable
-
-Design's `.sw-tmod-row.is-disabled` modifier (for the opposite-side token) is applied visually, but the row's `onClick` still fires. Fix: guard the click handler when the row is disabled.
-
-### F10 — Order polling cadence
-
-Current: `setInterval(..., 3000)` in `pollOrderStatus`. IMPL guide §4.8 specifies 2s. Five-minute fix.
-
-### F11 — `SwapExecuted` event ABI undocumented
-
-`useOrderSubmission` decodes the contract's `SwapExecuted` event but the ABI is hardcoded with no comment. Future readers can't verify it matches the Solidity event signature without cross-referencing the contract.
-
-### F13 — TTL countdown doesn't pause during active order
-
-`useQuoteExpiry` decrements the countdown even while `activeOrder` is non-null + non-terminal. Semantically wrong (no quote in flight to expire) but not user-visible since QuoteCard isn't rendered during an active order.
-
-### F16 — Chain switching not in `useWalletConnection`
-
-`wallet_switchEthereumChain` is called inline in `SwapPage.tsx` rather than via the hook. No `wallet_addEthereumChain` fallback for chains the user hasn't added (e.g. Bittensor EVM 964). Fix: move chain switching to the hook + add fallback.
-
-### F18 — Bittensor proxy setup doesn't check existing permissions
-
-`setupBittensorProxy` always prompts. Should skip the prompt + immediately mark `proxySetup=true` if the API reports an active permission already.
-
 ### F20 — `unwrapOutput` always false
 
-Frontend hardcodes `unwrapOutput=false` in the 11-field intent params. If user selected native ETH as output (i.e. wants ETH not WETH), the design's `auto-unwrap` semantics in `DexAggregatorApp.sol` aren't being exploited. Frontend could set `unwrapOutput=true` when output token is native.
+Frontend currently uses static `unwrapOutput=false` in the 11-field intent params (or doesn't set it explicitly — verify in current `useOrderSubmission.ts`). When user selected native ETH as output, the contract's `auto-unwrap` semantics in `DexAggregatorApp.sol` aren't being exploited. Should set `unwrapOutput=true` when output token is native.
 
-### F22 — Visual regression tolerances are broad
+### F22 — Visual regression tolerances
 
-Current per-state tolerances: 0.04 - 0.25. Many states pass partly because the tolerance hides real implementation differences (e.g. `.is-custom` not applied, no high-slippage warning). After F4 / F6 / FW10 land, tolerances should tighten to 0.005 - 0.05.
+Current per-state tolerances: 0.02–0.25. After Phase 12.8 + the cheap design wins land, tighten to 0.005–0.10. Some states (token-selector, history) can probably go lower.
+
+### F23 — Dev preview state missing store-injection params
+
+`useDevPreviewState` honors a small set of URL params; new E2E scripts need to inject deeper store state (`needsApproval`, `activeOrder.status`, `slippageBps`) and currently rely on `window.__DEV_SWAP_STORE__` which isn't exposed. Fix: expose `useSwapStore` getter on `window.__DEV_SWAP_STORE__` in dev builds.
+
+### F24 — `slippageBps` not persisted to localStorage
+
+Store's persist allowlist doesn't include `slippageBps`. The `settings-persistence.sh` E2E only confirms in-memory persistence. Fix: add to persist config in `store.ts`.
 
 ---
 
@@ -215,3 +105,121 @@ SettingsSheet's Done button should fire `toast.success({ title: 'Settings saved'
 The broken native-ETH input flow has been removed from the frontend. The `isNativeInput` detection block, `_user_submit=true` flag, `prepareDirectSubmit` API call, and `signer.sendTransaction({value})` branch have been deleted from `useOrderSubmission.ts`. `selectActionState` no longer returns `'sign-broadcast'` for native input — native ETH now falls through to `'swap-ready'` (or `'insufficient'` if balance is low). `TokenSelectorModal` disables native ETH rows with a `(wrap first)` label when the INPUT side is open and WETH is available in the token list.
 
 Contract upgrade tracked separately — make `executeIntent` payable + WETH wrapping: `executeIntent` in `AppIntentBase` must be made payable, and `_fundAndExecute` must call `IWETH.deposit{value: msg.value}()` to wrap native input atomically. Add Foundry tests for the native path and verify protocol fee handling when `msg.value > 0`.
+
+### F1 — Hook unit tests (resolved 2026-05-26)
+
+Added 7 hook test files at `tests/unit/hooks/*.test.ts` totaling 162 tests across the 7 hooks. Includes shared `fixtures.ts` (MOCK_TOKEN, MOCK_QUOTE, MOCK_ORDER, MOCK_BALANCES) and `test-utils.ts` (HookWrapper, resetStore, installEthereumStub). Strategy: `vi.spyOn(api, ...)` + global `window.ethereum` stub + `vi.mock('ethers'/'@polkadot/api')` at module level + `vi.useFakeTimers()` per test. `renderHook` from @testing-library/react.
+
+### F2 — Selector edge-case tests (resolved 2026-05-26)
+
+Added `tests/unit/selectors-edge.test.ts` with 52 tests covering null `walletChainId`, transient `walletAddress=''`, simultaneous flags, all 7 modeBlockVariant values, cross-chain SS58, and the F21 regression guard.
+
+### F3 — E2E flows (resolved 2026-05-26)
+
+Added 4 pagewire scripts at `tests/e2e/`: `approval-flow.sh`, `order-failure.sh`, `settings-persistence.sh`, `history-persistence.sh`. 7/7 E2E scripts now pass against a running dev server.
+
+### F4 — `.sw-slip.is-custom` modifier (resolved 2026-05-26)
+
+`SettingsSheet.tsx` now applies `is-custom` to the slippage chip container when `customSlippage !== ''`. Lime-tint visual feedback now fires when user types a custom slippage value.
+
+### F5 — `.sw-cmp-row.is-best` comparison row (resolved 2026-05-26)
+
+`SwapPage.mappers.ts:mapComparisonQuotes()` finds the highest-output row and flags `isBest: true`. `QuoteCard.tsx` applies `.sw-cmp-row.is-best` accordingly. (Mapper currently returns `[]` because `QuoteResult.comparison_quotes` is not populated by the API yet; structure is ready for when it is.)
+
+### F6 — TokenSelectorModal disabled click guard (resolved earlier; verified)
+
+Disabled rows already correctly suppress both click and keyboard handlers.
+
+### F7 — AbortController on fetches (resolved 2026-05-26)
+
+`useQuoteRequest.ts` and `useWalletBalances.ts` now use `AbortController`; abort fires on dep change. `api/client.ts` `getQuote` and `getWalletBalances` accept `signal: AbortSignal`.
+
+### F8 — Stale-quote race (resolved 2026-05-26)
+
+`useQuoteRequest.ts` uses a `useRef<number>(0)` request-version counter; stale responses are discarded.
+
+### F10 — Order polling cadence (resolved 2026-05-26)
+
+`useOrderSubmission.ts` polling interval changed from 3000 ms to 2000 ms per IMPL §4.8.
+
+### F11 — SwapExecuted event ABI documented (resolved 2026-05-26)
+
+`useOrderSubmission.ts:49` has an inline comment block matching the Solidity event signature.
+
+### F12 — Quote TTL auto-refetch (resolved earlier; verified)
+
+`useQuoteExpiry.ts` calls `requestQuote()` on TTL=0, gated by `!submitting && !activeOrder`.
+
+### F13 — Pause quote expiry during active order (resolved 2026-05-26)
+
+`useQuoteExpiry.ts` wraps the interval in `if (!store.activeOrder)`. Timer fully pauses while order is in flight. Switched to `useSwapStore.getState()` to avoid stale closures.
+
+### F14 — Bittensor balance routing (resolved 2026-05-26)
+
+`useWalletBalances.ts` forces `chain_id=0` when `walletMode === 'bittensor'`. Substrate path is correctly routed regardless of UI chain pick.
+
+### F15 — Cross-chain output balance (resolved 2026-05-26)
+
+`useWalletBalances.ts` now issues a second `api.getWalletBalances(outputAddr, chainId)` call for the output token in cross-chain mode (previously force-nulled the output balance).
+
+### F16 — Chain switching with fallback (resolved 2026-05-26)
+
+`switchChain(targetChainId)` exported from `useWalletConnection.ts`; falls back to `wallet_addEthereumChain` on error code 4902. `SwapPage.tsx` chain-pick handlers are one-liners.
+
+### F18 — Bittensor proxy pre-check (resolved 2026-05-26)
+
+`setupBittensorProxy()` checks `/api/v1/native-bittensor/permissions?owner=...` before launching the setup UI and short-circuits if an active permission already exists.
+
+### F19 — Recent-swaps history load (resolved earlier; verified)
+
+`useAppBootstrap.ts:15` calls `store.loadHistory()` on mount.
+
+### API error-body handling (resolved 2026-05-26)
+
+`api/client.ts` `getQuote` and `getWalletBalances` now throw when the JSON body contains an `error` field, even on HTTP 200. Calling hooks surface the error via `store.setError` + `toast.error(...)` instead of silently rendering zero balances.
+
+### A1 — Selector `needsApproval` state semantics (resolved 2026-05-26)
+
+`selectActionState` now returns `'awaiting-sig'` when `needsApproval && !approving` (instead of returning `'approving'` with a misleading spinner). The approval CTA itself lives in `WalletModeBlock` (variant `'approval'`); the ActionButton stays disabled with the "Awaiting approval" label until the user triggers the approval.
+
+### D1 — TTL `.is-warn` modifier (resolved 2026-05-26)
+
+`QuoteCard.tsx` now applies `.is-warn` (the modifier the design CSS actually defines) instead of the no-op `.is-expiring`. Threshold raised from 10s to 30s so the user has time to react before the auto-refetch.
+
+---
+
+## New issues found during Phase 12.8 audit
+
+### F23 — Dev preview state missing store-injection params (🟡 should-fix)
+
+`useDevPreviewState` honors only a small set of URL params (`wallet`, `cross`, `overlay`, etc.). The new E2E scripts (`approval-flow.sh`, `order-failure.sh`, `settings-persistence.sh`) need to inject deeper store state (`needsApproval`, `activeOrder.status`, `slippageBps`) and currently fall back to evaluating raw JS against `window.__DEV_SWAP_STORE__` — which is not exposed.
+
+**Fix:** Either (a) expose `useSwapStore` (or a getter) on `window.__DEV_SWAP_STORE__` in dev builds, or (b) extend `useDevPreviewState` to honor the missing params. Option (a) is more flexible for E2E injection and lower-risk than expanding the URL-param contract.
+
+### F24 — slippageBps not persisted to localStorage (🟡 should-fix)
+
+The store's persist allowlist doesn't include `slippageBps`, so the `settings-persistence.sh` E2E only confirms the value remains in memory; on hard reload it resets to default. Audit and add to persist config in `store.ts`.
+
+### F25 — ActionButton labels hard-coded to "USDC" (🟢 future)
+
+`ActionButton.tsx` `STATE_CONFIG` has `'insufficient'` → "Insufficient USDC" and `'approving'` → "Approving USDC…" hardcoded. Should accept the current token symbol as a prop and interpolate. (Already noted as FW11 — keeping for promotion when desired.)
+
+### D2/FW8 — QuoteCard skeleton state (🟡 medium effort, ~20 min)
+
+CSS `.sw-quote-skel` shimmer exists but the component renders nothing during initial `loading && !quote`. Add a skeleton render path.
+
+### D3/FW9 — Per-comparison-row "FETCHING" shimmer (🟡 medium effort, ~20 min)
+
+CSS supports per-row shimmer but mapper doesn't surface loading state. Bind to a `loading` flag on each comparison row.
+
+### D4/FW10 — High-slippage tint coverage (🟡 medium effort, ~15 min)
+
+Currently the `.v` value changes color when slippage > 5%; the design also tints `.sw-settings-sec`, the slippage slider, and the custom-input border. Extend to all elements via a shared `is-warn` class on the section container.
+
+### D5/FW13 — OrderStatusCard inline error message block (🟡 medium effort, ~20 min)
+
+CSS `.sw-status-err` exists; when `activeOrder.status === 'failed'` the API failure reason should render inline below the stepper. Currently silent.
+
+### D6/FW3 — Mobile-responsive TokenSelectorModal (🟡 medium effort, ~30 min)
+
+CSS `.sw-mobile` rule for `<640px` exists but the modal renders at fixed 440px regardless. Needs viewport-based class toggle or pure-CSS layout adjustment.

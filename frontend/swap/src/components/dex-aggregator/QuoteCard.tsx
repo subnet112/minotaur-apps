@@ -35,7 +35,9 @@ export default function QuoteCard({ quote }: QuoteCardProps) {
   }, [quote.ttlSeconds])
 
   const fillPct = (secondsLeft / quote.ttlSeconds) * 100
-  const ttlExpiring = secondsLeft <= 10
+  // Design CSS exposes `.sw-quote-ttl.is-warn` (cretan-tinted). Trigger at
+  // 30s so the user has time to react before the auto-refetch fires at 0.
+  const ttlExpiring = secondsLeft <= 30
 
   return (
     <section className="sw-quote sw-card">
@@ -47,7 +49,7 @@ export default function QuoteCard({ quote }: QuoteCardProps) {
           Quote
         </span>
         <span className="ln" aria-hidden="true" />
-        <span className={`r sw-quote-ttl ${ttlExpiring ? 'is-expiring' : ''}`.trim()}>
+        <span className={`r sw-quote-ttl ${ttlExpiring ? 'is-warn' : ''}`.trim()}>
           <span>
             Valid&nbsp;<span className="v">{formatTtl(secondsLeft)}</span>
           </span>

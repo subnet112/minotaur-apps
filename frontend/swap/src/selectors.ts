@@ -58,7 +58,11 @@ export function selectActionState(s: SelectableState): ActionState {
   if (!s.quote) return 'no-route'
 
   if (s.approving) return 'approving'
-  if (s.needsApproval) return 'approving'
+  // Approval CTA lives in WalletModeBlock (variant='approval'). The action
+  // button stays disabled and non-spinning while we wait for the user to
+  // trigger the approval there. `awaiting-sig` matches that semantic
+  // ("Awaiting approval", disabled, no glyph).
+  if (s.needsApproval) return 'awaiting-sig'
 
   if (s.submitting) return 'submitting'
   if (s.activeOrder && !TERMINAL_ORDER_STATUSES.has(s.activeOrder.status)) {
