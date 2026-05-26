@@ -83,6 +83,8 @@ export interface QuoteDisplay {
     outAmount: string
     deltaPct: string
     deltaDir: 'down' | 'up' | 'none'
+    /** True for the row with the highest output amount among comparison quotes. */
+    isBest?: boolean
   }>
 }
 

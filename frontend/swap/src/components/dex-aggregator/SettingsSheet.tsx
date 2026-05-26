@@ -168,7 +168,7 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
                   {preset} %
                 </button>
               ))}
-              <div className="sw-custom" style={isHighSlip ? { borderColor: 'rgba(220,91,29,0.5)' } : undefined}>
+              <div className={`sw-custom${customSlippage !== '' ? ' is-custom' : ''}`} style={isHighSlip ? { borderColor: 'rgba(220,91,29,0.5)' } : undefined}>
                 <input
                   type="text"
                   value={customSlippage}

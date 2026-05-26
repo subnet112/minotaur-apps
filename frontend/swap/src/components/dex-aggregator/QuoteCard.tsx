@@ -100,7 +100,7 @@ export default function QuoteCard({ quote }: QuoteCardProps) {
             <span>External DEXes</span>
           </span>
           {quote.comparison.map((row) => (
-            <div key={row.dex} className="sw-cmp-row">
+            <div key={row.dex} className={`sw-cmp-row${row.isBest ? ' is-best' : ''}`}>
               <span className="who">
                 <span className={`mark ${row.iconClass}`}>{row.glyph}</span>
                 <span>{row.dex}</span>

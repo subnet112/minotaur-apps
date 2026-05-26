@@ -48,6 +48,40 @@ describe('mapQuoteResultToQuoteCardProps', () => {
     const props = mapQuoteResultToQuoteCardProps(q, usdc, eth, '1', 30)
     expect(props.ttlSeconds).toBe(30)
   })
+
+  // F5 regression: comparison_quotes absent → comparison is empty array
+  it('F5: returns comparison: [] when comparison_quotes is absent', () => {
+    const q: QuoteResult = {
+      estimated_output: '1.0', suggested_min_output: '0.9',
+      ready_params: {} as any, platform_fee_wei: '0',
+      valid_for_seconds: 60, route_summary: '', gas_estimate: 0,
+    } as any
+    const props = mapQuoteResultToQuoteCardProps(q, usdc, eth, '1', 60)
+    expect(props.comparison).toEqual([])
+  })
+
+  // F5 regression: with 3 comparison rows the highest-output row has isBest=true
+  it('F5: marks the highest-output comparison row as isBest', () => {
+    const q = {
+      estimated_output: '1.0', suggested_min_output: '0.9',
+      ready_params: {} as any, platform_fee_wei: '0',
+      valid_for_seconds: 60, route_summary: '', gas_estimate: 0,
+      comparison_quotes: [
+        { name: 'Uniswap',  output_amount: '0.95' },
+        { name: 'Curve',    output_amount: '1.10' },
+        { name: 'Balancer', output_amount: '0.88' },
+      ],
+    }
+    const props = mapQuoteResultToQuoteCardProps(q as any, usdc, eth, '1', 60)
+    expect(props.comparison).toHaveLength(3)
+    // Curve has the highest output (1.10) — it must be flagged isBest
+    const curve = props.comparison.find((r) => r.dex === 'Curve')
+    const uni   = props.comparison.find((r) => r.dex === 'Uniswap')
+    const bal   = props.comparison.find((r) => r.dex === 'Balancer')
+    expect(curve?.isBest).toBe(true)
+    expect(uni?.isBest).toBe(false)
+    expect(bal?.isBest).toBe(false)
+  })
 })
 
 function baseFormState() {

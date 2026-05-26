@@ -154,6 +154,54 @@ export function mapQuoteResultToQuoteCardProps(
     gasUsd,
     feeUsd,
     routeSummary: q.route_summary ?? '',
-    comparison: [],
+    // TODO: populate comparison when the API surfaces `comparison_quotes`.
+    // Expected shape per quote object:
+    //   comparison_quotes: Array<{ name: string; output_amount: string }>
+    // where `name` is one of 'Uniswap' | 'Curve' | 'Balancer'.
+    comparison: mapComparisonQuotes((q as any).comparison_quotes),
   }
+}
+
+/** Glyph + icon class lookup for known external DEX names. */
+const DEX_META: Record<string, { glyph: string; iconClass: 'uni' | 'crv' | 'bal' }> = {
+  Uniswap: { glyph: 'U', iconClass: 'uni' },
+  Curve:   { glyph: 'C', iconClass: 'crv' },
+  Balancer: { glyph: 'B', iconClass: 'bal' },
+}
+
+/**
+ * Maps raw `comparison_quotes` from the QuoteResult API response into the
+ * display shape `QuoteDisplay.comparison` expects.
+ *
+ * Returns `[]` when no comparison data is provided, ensuring backward
+ * compat while the API field is not yet populated.
+ */
+function mapComparisonQuotes(
+  raw: Array<{ name: string; output_amount: string }> | null | undefined
+): QuoteDisplay['comparison'] {
+  if (!raw || raw.length === 0) return []
+
+  // Find the index of the row with the highest output_amount.
+  let bestIdx = 0
+  let bestVal = -Infinity
+  raw.forEach((row, idx) => {
+    const v = parseFloat(row.output_amount)
+    if (!Number.isNaN(v) && v > bestVal) {
+      bestVal = v
+      bestIdx = idx
+    }
+  })
+
+  return raw.map((row, idx) => {
+    const meta = DEX_META[row.name] ?? { glyph: row.name.charAt(0).toUpperCase(), iconClass: 'uni' as const }
+    return {
+      dex: row.name as 'Uniswap' | 'Curve' | 'Balancer',
+      glyph: meta.glyph,
+      iconClass: meta.iconClass,
+      outAmount: row.output_amount,
+      deltaPct: '',
+      deltaDir: 'none' as const,
+      isBest: idx === bestIdx,
+    }
+  })
 }
