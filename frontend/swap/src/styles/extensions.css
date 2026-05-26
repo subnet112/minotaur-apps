@@ -432,7 +432,19 @@
    Not part of the formal design catalog — internal chrome for the
    handoff prototype only. Lives here (extensions.css) rather than in
    components.css so it stays clearly app-local. The minotaur-apps team
-   doesn't need any of this in production: ignore .dex-content {
+   doesn't need any of this in production: ignore.
+   ========================================================================= */
+/* The stage centers the 580 px column inside whatever container it sits
+   in (full viewport when /swap stands alone, or the iframe area inside
+   the platform shell). Without this the column hugged the left edge
+   and the prototype's hero-style centering was lost. */
+.dex-stage {
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px 48px;
+}
+
+.dex-content {
   width: 100%;
   max-width: 580px;
   display: flex;
