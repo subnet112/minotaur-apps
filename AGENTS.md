@@ -6,18 +6,10 @@ and similar tools.
 
 ## Pick-up references (read these first if starting a new session)
 
-- **`docs/superpowers/SESSION_BRIEF.md`** — current branch state, what's done, what's next, critical invariants. Read me first.
-- **`docs/superpowers/specs/`** — design specs (one per phase).
-- **`docs/superpowers/plans/`** — implementation plans.
-- **`frontend/swap/KNOWN_ISSUES.md`** — open bugs + gaps with fix IDs (F1, F7, F8, F12, F14, F15, F19, F21 etc). Updated as issues are found.
-- **Memory at `~/.claude/projects/-workspaces-minotaur-apps/memory/`** — durable facts that survive across sessions (OSS conventions, project-specific rules).
-
-If a session is starting cold (no recent context), follow this order:
-1. Read `SESSION_BRIEF.md`.
-2. Read `KNOWN_ISSUES.md`.
-3. Read the latest spec in `docs/superpowers/specs/`.
-4. Run the verify-state commands from the session brief.
-5. Then proceed.
+- **`frontend/swap/KNOWN_ISSUES.md`** — open bugs + gaps with fix IDs. Updated as issues are found.
+- **`frontend/swap/README.md`** — frontend quickstart, dev commands, test layout.
+- **`README.md`** — repo overview, OSS quickstart.
+- Recent `git log` on the active branch — surfaces in-flight work.
 
 ## Repo purpose
 
@@ -114,7 +106,7 @@ z-layer matches the rebuild's prototype. Functional core is the 7 hooks
 + Zustand store + ethers v6 signing path. The 11-field SWAP intent
 encoding is locked by `tests/unit/intent-params.test.ts`.
 
-Hybrid composition per `docs/superpowers/specs/2026-05-25-phase-12.5-hybrid-rebase-spec.md`:
+Hybrid composition:
 - 6 components kept verbatim from the design tree (chrome + simple
   display: AppPageHeader, HeaderIconButton, WalletConnectPanel,
   WalletModeBlock, QuoteCard, WalletButton).

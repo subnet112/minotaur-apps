@@ -8,8 +8,6 @@
  *   - props come from store selectors + mappers, not URL params + mocks
  *   - StateSwitcher is dropped (URL-state previewer is meaningless with
  *     real Zustand; useDevPreviewState handles URL-driven preview in dev)
- *
- * Spec: docs/superpowers/specs/2026-05-25-dex-design-consolidation-design.md §5.3
  */
 import { useMemo } from 'react'
 import { useSwapStore } from '@/store'

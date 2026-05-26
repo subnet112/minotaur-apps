@@ -2,7 +2,7 @@
 
 Tracked correctness gaps and incomplete behavior in `frontend/swap/`. Maintained as part of the consolidation; new issues added as they're discovered. Fixed issues are moved to a bottom section + dated rather than deleted.
 
-> **For contributors:** before reporting a bug, check here. If your issue isn't listed, file it against the repo. The fix-tracking IDs (`F#`) match the Phase 12.8 spec at `docs/superpowers/specs/2026-05-26-phase-12.8-correctness-fixes-spec.md`.
+> **For contributors:** before reporting a bug, check here. If your issue isn't listed, file it against the repo. Fix-tracking IDs (`F#`) are internal references used in commit messages.
 
 ## Severity legend
 

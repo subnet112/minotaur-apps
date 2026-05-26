@@ -15,9 +15,7 @@ unstyled-but-functional app did vs. the new design-driven one.
 
 The functional code (`hooks/`, `swap.store.ts`, `swap.types.ts`, `swap.utils.ts`)
 is **not** here — it was moved into `frontend/swap/src/` in the same migration.
-See `docs/superpowers/specs/2026-05-25-dex-design-consolidation-design.md` and
-`docs/superpowers/specs/2026-05-25-phase-12.5-hybrid-rebase-spec.md` for
-the full rationale.
+See `frontend/swap/README.md` for the active layout.
 
 ## When to consult this directory
 

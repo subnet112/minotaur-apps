@@ -17,7 +17,6 @@ Each app defines an **outcome + scoring**. The network's Solving Engine (run by 
 | `contracts/draft/` | Staging area for new apps (DCA, PortfolioRebalancer, YieldOptimizer, LPOptimizer). Not in foundry's build path. |
 | `contracts/test/` + `contracts/script/` | Foundry tests + deploy scripts. |
 | `frontend/swap/` | **Standalone DEX swap app** — Vite + React reference implementation for `DexAggregatorApp`. See [`frontend/swap/README.md`](frontend/swap/README.md). |
-| `docs/superpowers/` | Design specs + implementation plans. |
 | `archive/` | Retired code, kept for reference until shipped. |
 | `lib/minotaur_contracts/` | Platform contracts (`AppIntentBase`, `EphemeralProxy`, validator quorum) as a git submodule. |
 
