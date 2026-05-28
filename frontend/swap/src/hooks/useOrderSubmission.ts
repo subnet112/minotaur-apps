@@ -1,10 +1,12 @@
 import { useEffect, useCallback, useRef } from 'react'
 import { useToast } from '@/components/shell'
 import { useSwapStore } from '../store'
-import { BITTENSOR_CHAIN_ID } from '@/config/chains'
+import { BITTENSOR_CHAIN_ID, TOKENS } from '@/config/chains'
 import { formatAmount, shorten } from '../utils'
 import { classifyOrderStatus } from '@/lib/orderStatus'
 import * as api from '@/api/client'
+import { useWalletClient, usePublicClient } from 'wagmi'
+import { keccak256, toBytes, encodeAbiParameters, slice, type Address } from 'viem'
 
 /**
  * Order submission hook: handles submit + ERC-20 approval + EIP-712 signing + polling.
@@ -13,6 +15,8 @@ export function useOrderSubmission() {
   const toast = useToast()
   const store = useSwapStore()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const { data: walletClient } = useWalletClient()
+  const publicClient = usePublicClient()
 
   const pollOrderStatus = useCallback((orderId: string) => {
     if (pollRef.current) clearInterval(pollRef.current)
@@ -51,46 +55,68 @@ export function useOrderSubmission() {
               title: 'Swap filled',
               message: scoreStr,
             })
-            // Fetch execution details from tx receipt
-            if (status.tx_hash && window.ethereum) {
+            // Fetch execution details from tx receipt via viem's public client
+            // (wagmi-injected — same RPC the rest of the app uses).
+            if (status.tx_hash && publicClient) {
               try {
-                const { ethers } = await import('ethers')
-                const provider = new ethers.BrowserProvider(window.ethereum)
-                const receipt = await provider.getTransactionReceipt(
-                  status.tx_hash.startsWith('0x') ? status.tx_hash : '0x' + status.tx_hash
-                )
+                const txHash = (status.tx_hash.startsWith('0x')
+                  ? status.tx_hash
+                  : '0x' + status.tx_hash) as `0x${string}`
+                const receipt = await publicClient.getTransactionReceipt({ hash: txHash })
                 if (receipt) {
                   // SwapExecuted event ABI — keep in sync with contracts/src/DexAggregatorApp.sol:
-                  //   event SwapExecuted(
-                  //     bytes32 indexed orderId,
-                  //     address tokenIn,
-                  //     address tokenOut,
-                  //     uint256 amountIn,
-                  //     uint256 amountOut,
-                  //     uint256 fee
-                  //   )
-                  const swapTopic = ethers.id('SwapExecuted(bytes32,address,address,address,uint256,uint256,uint256)')
-                  const swapLog = receipt.logs.find(l => l.topics[0] === swapTopic)
+                  //   event SwapExecuted(bytes32 indexed orderId, address tokenIn, address tokenOut,
+                  //     uint256 amountIn, uint256 amountOut, uint256 fee)
+                  const swapTopic = keccak256(toBytes(
+                    'SwapExecuted(bytes32,address,address,address,uint256,uint256,uint256)'
+                  ))
+                  const swapLog = receipt.logs.find((l) => l.topics[0] === swapTopic)
                   if (swapLog) {
-                    const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-                      ['address', 'address', 'uint256', 'uint256', 'uint256'],
-                      swapLog.data
-                    )
+                    // Decode the non-indexed fields (tokenIn, tokenOut, amountIn, amountOut, fee)
+                    // — see solver_guide.md §SwapExecuted for the indexed/non-indexed split.
+                    const { decodeAbiParameters } = await import('viem')
+                    const decoded = decodeAbiParameters(
+                      [
+                        { type: 'address' }, { type: 'address' },
+                        { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' },
+                      ],
+                      swapLog.data,
+                    ) as readonly [Address, Address, bigint, bigint, bigint]
                     const [tokenIn, tokenOut, amountIn, amountOut, fee] = decoded
                     const minOutput = BigInt(String(
                       status.params?.min_output_amount
                       || store.quote?.ready_params?.min_output_amount
                       || '0'
                     ))
-                    const surplusWei = BigInt(amountOut) - minOutput
+                    const surplusWei = amountOut - minOutput
+
+                    // Format raw wei → "0.0481 USDC". Decimals + symbol come
+                    // from the chain's TOKENS list; unknown tokens fall back
+                    // to 18 decimals + shortened address. Fee is denominated
+                    // in the output token per the SwapExecuted ABI.
+                    const tokens = TOKENS[store.chainId] || []
+                    const inMeta = tokens.find((t) => t.address.toLowerCase() === tokenIn.toLowerCase())
+                    const outMeta = tokens.find((t) => t.address.toLowerCase() === tokenOut.toLowerCase())
+                    const inDec = inMeta?.decimals ?? 18
+                    const outDec = outMeta?.decimals ?? 18
+                    const inSym = inMeta?.symbol ?? shorten(tokenIn, 4)
+                    const outSym = outMeta?.symbol ?? shorten(tokenOut, 4)
+                    const fmt = (wei: bigint, dec: number, sym: string) =>
+                      `${formatAmount(wei.toString(), dec, 6)} ${sym}`
+
                     store.setExecutionDetails({
-                      amountIn: amountIn.toString(),
-                      amountOut: amountOut.toString(),
-                      fee: fee.toString(),
-                      surplus: surplusWei > 0n ? surplusWei.toString() : '0',
-                      tokenIn: tokenIn as string,
-                      tokenOut: tokenOut as string,
-                      gasUsed: receipt.gasUsed?.toString() || '0',
+                      amountIn: fmt(amountIn, inDec, inSym),
+                      amountOut: fmt(amountOut, outDec, outSym),
+                      fee: fmt(fee, outDec, outSym),
+                      surplus: surplusWei > 0n ? fmt(surplusWei, outDec, outSym) : '0',
+                      tokenIn: tokenIn,
+                      tokenOut: tokenOut,
+                      // Gas is an integer count of gas units, not wei — no
+                      // decimal formatting; just thousands-separators for
+                      // legibility.
+                      gasUsed: receipt.gasUsed != null
+                        ? Number(receipt.gasUsed).toLocaleString()
+                        : '0',
                     })
                   }
                 }
@@ -248,37 +274,51 @@ export function useOrderSubmission() {
         throw submitErr
       }
 
-      // Step 2: EIP-712 user signature for external wallets (MetaMask)
-      if (store.walletMode === 'external' && window.ethereum && store.contractAddress && order.order_id) {
+      // Step 2: EIP-712 user signature for external wallets (any wagmi connector).
+      if (store.walletMode === 'external' && walletClient && store.contractAddress && order.order_id) {
         try {
-          const { ethers } = await import('ethers')
-          const provider = new ethers.BrowserProvider(window.ethereum)
-          const signer = await provider.getSigner()
-
-          const orderIdHash = ethers.keccak256(ethers.toUtf8Bytes(order.order_id))
+          // Hash inputs to the IntentOrder typehash. paramsHash + orderId are
+          // keccak256 of variable-length bytes; viem's keccak256 takes a hex
+          // string or bytes, so we encode strings as utf-8 first.
+          const orderIdHash = keccak256(toBytes(order.order_id))
 
           const intentParamsHex = order.params?.intent_params_hex
-            ? '0x' + order.params.intent_params_hex
-            : ethers.AbiCoder.defaultAbiCoder().encode(
-                ['address', 'address', 'uint256', 'uint256', 'address', 'uint256', 'uint8', 'bytes32', 'bytes32'],
-                [orderParams.input_token, orderParams.output_token,
-                 orderParams.input_amount || '0', orderParams.min_output_amount || '0',
-                 addr, 0, 0, ethers.zeroPadValue('0x', 32), ethers.zeroPadValue('0x', 32)]
+            ? ('0x' + (order.params.intent_params_hex as string)) as `0x${string}`
+            : encodeAbiParameters(
+                [
+                  { type: 'address' }, { type: 'address' },
+                  { type: 'uint256' }, { type: 'uint256' },
+                  { type: 'address' }, { type: 'uint256' },
+                  { type: 'uint8' }, { type: 'bytes32' }, { type: 'bytes32' },
+                ],
+                [
+                  orderParams.input_token as Address,
+                  orderParams.output_token as Address,
+                  BigInt(orderParams.input_amount || '0'),
+                  BigInt(orderParams.min_output_amount || '0'),
+                  addr as Address,
+                  0n, 0,
+                  ('0x' + '00'.repeat(32)) as `0x${string}`,
+                  ('0x' + '00'.repeat(32)) as `0x${string}`,
+                ],
               )
 
-          const paramsHash = ethers.keccak256(intentParamsHex)
-          const intentSelector = order.params?.intent_selector
-            ? '0x' + order.params.intent_selector
-            : ethers.dataSlice(ethers.keccak256(ethers.toUtf8Bytes('swap(address,address,uint256,uint256,address)')), 0, 4)
+          const paramsHash = keccak256(intentParamsHex)
+          const intentSelector = (order.params?.intent_selector
+            ? ('0x' + order.params.intent_selector) as `0x${string}`
+            : slice(keccak256(toBytes('swap(address,address,uint256,uint256,address)')), 0, 4))
 
-          const SENTINEL_NONCE = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+          // 2^256 - 1 — matches the canonical sentinel-nonce convention used
+          // by the relayer (skips on-chain nonce verification) and the new
+          // server-side EIP-712 recovery in api/routes/_signature_verify.py.
+          const SENTINEL_NONCE = (1n << 256n) - 1n
 
           const domain = {
             name: 'MinotaurAppIntent',
             version: '1',
             chainId: store.chainId,
-            verifyingContract: store.contractAddress,
-          }
+            verifyingContract: store.contractAddress as Address,
+          } as const
           const types = {
             IntentOrder: [
               { name: 'orderId', type: 'bytes32' },
@@ -293,25 +333,31 @@ export function useOrderSubmission() {
               { name: 'maxExecutions', type: 'uint256' },
               { name: 'cooldown', type: 'uint256' },
             ],
-          }
-          const value = {
+          } as const
+          const message = {
             orderId: orderIdHash,
-            app: store.contractAddress,
+            app: store.contractAddress as Address,
             intentSelector,
             paramsHash,
-            submittedBy: addr,
-            chainId: store.chainId,
-            deadline: Math.floor(Number(order.deadline ?? 0) || Date.now() / 1000 + 3600),
+            submittedBy: addr as Address,
+            chainId: BigInt(store.chainId),
+            deadline: BigInt(Math.floor(Number(order.deadline ?? 0) || Date.now() / 1000 + 3600)),
             nonce: SENTINEL_NONCE,
             perpetual: false,
-            maxExecutions: 1,
-            cooldown: 0,
+            maxExecutions: 1n,
+            cooldown: 0n,
           }
 
           // Update the sticky loading toast to prompt the user — keep variant
           // 'loading' so the toast stays pinned while the wallet popup is open.
-          toast.update(submitId, { variant: 'loading', title: 'Please sign the swap order in MetaMask…' })
-          const userSignature = await signer.signTypedData(domain, types, value)
+          toast.update(submitId, { variant: 'loading', title: 'Please sign the swap order in your wallet…' })
+          const userSignature = await walletClient.signTypedData({
+            account: addr as Address,
+            domain,
+            types,
+            primaryType: 'IntentOrder',
+            message,
+          })
 
           // Single signature flow per subnet PR #55 (api: drop EIP-191
           // owner_signature on attach_signature, server-side ECDSA-recovers
@@ -328,7 +374,14 @@ export function useOrderSubmission() {
           // once store.setActiveOrder is called.
           toast.update(submitId, { variant: 'loading', title: 'Order signed, waiting for relayer…' })
         } catch (sigErr: any) {
-          if (sigErr?.code === 'ACTION_REJECTED' || sigErr?.code === 4001) {
+          // viem throws UserRejectedRequestError on user-reject (code 4001
+          // preserved per EIP-1193). Keep the legacy ACTION_REJECTED check
+          // for any signer that still returns ethers-shaped errors.
+          if (
+            sigErr?.code === 'ACTION_REJECTED'
+            || sigErr?.code === 4001
+            || sigErr?.name === 'UserRejectedRequestError'
+          ) {
             // For EVM external-wallet swaps the signature is mandatory —
             // the server needs it for consensus verification. Abort loudly
             // instead of shipping an unsigned order.

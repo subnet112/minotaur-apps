@@ -38,7 +38,7 @@ interface SwapFormStoreSlice {
   inputAmount: string
   inputBalance: string | null
   outputBalance: string | null
-  walletMode: 'external' | 'managed' | 'bittensor'
+  walletMode: 'external' | 'bittensor'
   walletConnected: boolean
   slippageBps: number
   loading: boolean

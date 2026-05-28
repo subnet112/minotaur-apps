@@ -61,10 +61,21 @@ interface SwapFormProps {
   /** Cross-chain toggle. */
   cross: boolean
   onToggleCross: () => void
+  /** When false (default) the cross-chain pill still renders but is disabled —
+   *  greyed out, non-interactive, no toggle handler — so users can see the
+   *  capability is on the roadmap without being able to enter a broken mode
+   *  on Apps (like the DEX Aggregator) that haven't shipped the bridge legs. */
+  crossChainEnabled?: boolean
 
   /** Chain pill clicks — opens inline chain dropdown; receives selected chainId. */
   onPickFromChain?: (chainId: number) => void
   onPickToChain?: (chainId: number) => void
+  /** When provided, the chain dropdown lists only these chain IDs (intersected
+   *  with CHAIN_CONFIG). Source: appSupportedChains in the store — populated
+   *  from the active App's /v1/apps/{id}/status .deployments filtered by
+   *  order-ready status. When undefined / empty, falls back to all configured
+   *  chains (legacy behavior). */
+  supportedChainIds?: readonly number[]
 
   /** Recipient field — surfaces when `cross && wallet==='bittensor'`. */
   showRecipient: boolean
@@ -82,6 +93,11 @@ interface SwapFormProps {
   onPickFromToken: () => void
   onPickToToken: () => void
   onOpenSettings: () => void
+
+  /** Optional render slot on the right side of `.sw-form-head` (where the
+   *  spacer used to live). The page mounts the history/debug toggles here
+   *  so they sit next to the settings pill instead of the page header. */
+  headerRight?: React.ReactNode
 
   /** Wallet context — feeds defaults for the action button label/glyph. */
   wallet: DesignWalletMode
@@ -121,21 +137,25 @@ export default function SwapForm(props: SwapFormProps) {
       <BracketCorners />
 
       <div className="sw-form-head">
+        {/* Single settings entrypoint — slippage label + cog merged into one
+            clickable pill. Used to be two buttons (slip pill + standalone cog)
+            that both opened the same SettingsSheet; consolidated for clarity. */}
         <button
           className="sw-slip"
           type="button"
-          aria-label="Slippage and deadline"
+          aria-label="Open settings — slippage and deadline"
           onClick={props.onOpenSettings}
         >
           <span className="glyph" aria-hidden="true" />
           <span className="v">{props.slippagePct}</span>
           <span className="sep">/</span>
           <span className="v">{props.deadlineMin}m</span>
+          <span className="sw-slip-cog" aria-hidden="true" style={{ display: 'inline-flex', marginLeft: 8, opacity: 0.7 }}>
+            <CogGlyph />
+          </span>
         </button>
         <span className="spacer" />
-        <button className="sw-cog" type="button" aria-label="Settings" onClick={props.onOpenSettings}>
-          <CogGlyph />
-        </button>
+        {props.headerRight}
       </div>
 
       <div className="sw-form-body">
@@ -158,20 +178,22 @@ export default function SwapForm(props: SwapFormProps) {
             </button>
             {showFromDropdown && (
               <div className="sw-chain-dropdown" role="listbox" aria-label="Select source chain">
-                {Object.entries(CHAIN_CONFIG).map(([id, cfg]) => (
-                  <button
-                    key={id}
-                    className="sw-chain-dropdown-item"
-                    role="option"
-                    type="button"
-                    onClick={() => {
-                      props.onPickFromChain?.(Number(id))
-                      setShowFromDropdown(false)
-                    }}
-                  >
-                    {cfg.name}
-                  </button>
-                ))}
+                {Object.entries(CHAIN_CONFIG)
+                  .filter(([id]) => !props.supportedChainIds || props.supportedChainIds.length === 0 || props.supportedChainIds.includes(Number(id)))
+                  .map(([id, cfg]) => (
+                    <button
+                      key={id}
+                      className="sw-chain-dropdown-item"
+                      role="option"
+                      type="button"
+                      onClick={() => {
+                        props.onPickFromChain?.(Number(id))
+                        setShowFromDropdown(false)
+                      }}
+                    >
+                      {cfg.name}
+                    </button>
+                  ))}
               </div>
             )}
           </div>
@@ -195,20 +217,22 @@ export default function SwapForm(props: SwapFormProps) {
                 </button>
                 {showToDropdown && (
                   <div className="sw-chain-dropdown" role="listbox" aria-label="Select destination chain">
-                    {Object.entries(CHAIN_CONFIG).map(([id, cfg]) => (
-                      <button
-                        key={id}
-                        className="sw-chain-dropdown-item"
-                        role="option"
-                        type="button"
-                        onClick={() => {
-                          props.onPickToChain?.(Number(id))
-                          setShowToDropdown(false)
-                        }}
-                      >
-                        {cfg.name}
-                      </button>
-                    ))}
+                    {Object.entries(CHAIN_CONFIG)
+                      .filter(([id]) => !props.supportedChainIds || props.supportedChainIds.length === 0 || props.supportedChainIds.includes(Number(id)))
+                      .map(([id, cfg]) => (
+                        <button
+                          key={id}
+                          className="sw-chain-dropdown-item"
+                          role="option"
+                          type="button"
+                          onClick={() => {
+                            props.onPickToChain?.(Number(id))
+                            setShowToDropdown(false)
+                          }}
+                        >
+                          {cfg.name}
+                        </button>
+                      ))}
                   </div>
                 )}
               </div>
@@ -218,7 +242,15 @@ export default function SwapForm(props: SwapFormProps) {
             className={`sw-xchain ${props.cross ? 'is-on' : ''}`.trim()}
             type="button"
             aria-pressed={props.cross}
-            onClick={props.onToggleCross}
+            aria-disabled={!props.crossChainEnabled}
+            disabled={!props.crossChainEnabled}
+            onClick={props.crossChainEnabled ? props.onToggleCross : undefined}
+            title={props.crossChainEnabled ? undefined : 'Cross-chain swaps coming soon'}
+            style={
+              !props.crossChainEnabled
+                ? { opacity: 0.45, cursor: 'not-allowed' }
+                : undefined
+            }
           >
             <span className="glyph" aria-hidden="true" />
             {!props.cross && <span>Cross-chain</span>}

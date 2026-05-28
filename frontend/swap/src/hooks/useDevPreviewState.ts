@@ -9,7 +9,7 @@
  * shake the rest.
  *
  * Honored params:
- *   wallet  = disconnected | managed | metamask | bittensor
+ *   wallet  = disconnected | metamask | bittensor
  *   cross   = 1
  *   overlay = wallet-panel | token-from | token-to | settings
  *   history = 1
@@ -31,11 +31,10 @@ export function useDevPreviewState() {
     const wallet = params.get('wallet')
     if (wallet === 'disconnected') {
       store.setWalletConnected(false)
-    } else if (wallet === 'managed' || wallet === 'metamask' || wallet === 'bittensor') {
-      // Map URL preview wallet -> store walletMode.
-      // store.walletMode is 'external' | 'managed' | 'bittensor' — 'metamask' in URL maps to 'external'.
+    } else if (wallet === 'metamask' || wallet === 'bittensor') {
+      // 'metamask' in URL maps to store's 'external' walletMode.
       const mode = wallet === 'metamask' ? 'external' : wallet
-      store.setWalletMode(mode as 'external' | 'managed' | 'bittensor')
+      store.setWalletMode(mode as 'external' | 'bittensor')
       store.setWalletConnected(true)
       // Synthetic preview address — never used to sign.
       store.setWalletAddress('0x5a33Bf4A6c1Da92e0F2BcC1eDf8a4D33C8b9c108')

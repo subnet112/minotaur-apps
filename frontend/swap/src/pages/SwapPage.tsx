@@ -36,7 +36,7 @@ import { useComparisonQuotes } from '@/hooks/useComparisonQuotes'
 import { useApproval } from '@/hooks/useApproval'
 
 import AppPageHeader from '@/components/dex-aggregator/AppPageHeader'
-import WalletButton from '@/components/dex-aggregator/WalletButton'
+import { ConnectButton } from '@rainbow-me/rainbowkit'
 import HeaderIconButton from '@/components/dex-aggregator/HeaderIconButton'
 import SwapForm from '@/components/dex-aggregator/SwapForm'
 import TokenSelectorModal from '@/components/dex-aggregator/TokenSelectorModal'
@@ -116,6 +116,7 @@ export default function SwapPage() {
   const tokenSelectorOpen = useSwapStore((s) => s.tokenSelectorOpen)
   const showSettings = useSwapStore((s) => s.showSettings)
   const isCrossChain = useSwapStore((s) => s.isCrossChain)
+  const appSupportedChains = useSwapStore((s) => s.appSupportedChains)
   const evmRecipient = useSwapStore((s) => s.evmRecipient)
   const setInputToken = useSwapStore((s) => s.setInputToken)
   const setOutputToken = useSwapStore((s) => s.setOutputToken)
@@ -152,12 +153,11 @@ export default function SwapPage() {
 
   // Active address — derived from wallet mode + individual address fields
   const activeAddress = useSwapStore((s) => {
-    if (s.walletMode === 'managed' && s.managedWallet) return s.managedWallet.address
     if (s.walletMode === 'bittensor' && s.bittensorAddress) return s.bittensorAddress
     return s.walletAddress
   })
 
-  // Map store wallet mode (3 values + bool) into design's 4-value union
+  // Map store wallet mode into design's 3-value union ('managed' retired).
   const designWallet =
     !walletConnected
       ? ('disconnected' as const)
@@ -216,32 +216,14 @@ export default function SwapPage() {
     <>
       <AppPageHeader
         actions={
-          <>
-            <WalletButton
-              mode={designWallet}
-              address={activeAddress}
-              onClick={() => {
-                if (!walletConnected) {
-                  wallet.connectExternalWallet?.()
-                } else {
-                  // Design pending per IMPL §3.2 — disconnect-on-click placeholder
-                  setWalletConnected(false)
-                }
-              }}
-            />
-            <HeaderIconButton
-              role="history"
-              active={showHistory}
-              onClick={() => setShowHistory(!showHistory)}
-            />
-            {import.meta.env.DEV && (
-              <HeaderIconButton
-                role="debug"
-                active={showDebug}
-                onClick={() => setShowDebug(!showDebug)}
-              />
-            )}
-          </>
+          // RainbowKit handles connect / account / chain. The history (and
+          // dev-only debug) toggles live on the swap form head instead — the
+          // page header is reserved for wallet/global identity.
+          <ConnectButton
+            showBalance={false}
+            chainStatus={{ smallScreen: 'icon', largeScreen: 'full' }}
+            accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }}
+          />
         }
       />
 
@@ -258,6 +240,29 @@ export default function SwapPage() {
 
           <SwapForm
             {...swapFormBase}
+            // Restrict chain dropdown to chains where this App is actually
+            // deployed (populated by useAppBootstrap from /v1/apps/{id}/status).
+            // Empty array = fall back to all configured chains (legacy path).
+            supportedChainIds={appSupportedChains}
+            // Cross-chain pill is hidden until the App ships bridge legs.
+            // Defaults to false on SwapForm; explicit here for grep-ability.
+            crossChainEnabled={false}
+            headerRight={
+              <>
+                <HeaderIconButton
+                  role="history"
+                  active={showHistory}
+                  onClick={() => setShowHistory(!showHistory)}
+                />
+                {import.meta.env.DEV && (
+                  <HeaderIconButton
+                    role="debug"
+                    active={showDebug}
+                    onClick={() => setShowDebug(!showDebug)}
+                  />
+                )}
+              </>
+            }
             fromToken={fromTokenDisplay}
             toToken={toTokenDisplay_}
             fromAmount={inputAmount}
@@ -292,11 +297,16 @@ export default function SwapPage() {
             recipientValue={evmRecipient}
             onChangeRecipient={(v) => useSwapStore.getState().setEvmRecipient(v, 'manual')}
             onMetaMaskRecipient={async () => {
-              if (typeof window === 'undefined' || !window.ethereum) return
-              try {
-                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[]
-                if (accounts[0]) useSwapStore.getState().setEvmRecipient(accounts[0], 'metamask')
-              } catch { /* user rejected */ }
+              // If the user is already connected via RainbowKit, use that
+              // address as the recipient. Otherwise pop the connect modal
+              // and let them choose a connector — they'll have to click
+              // again once connected.
+              const { walletAddress, walletConnected } = useSwapStore.getState()
+              if (walletConnected && walletAddress) {
+                useSwapStore.getState().setEvmRecipient(walletAddress, 'metamask')
+              } else {
+                wallet.connectExternalWallet?.()
+              }
             }}
             onSwapDirection={() => swapTokens()}
             onPickFromToken={() => setTokenSelectorOpen('input')}
@@ -372,7 +382,7 @@ export default function SwapPage() {
           tokens={modalTokens}
           oppositeSymbol={outputToken?.symbol ?? ''}
           sideOpen="input"
-          canImport={typeof window !== 'undefined' && !!window.ethereum}
+          canImport={true}
           onCustomImport={makeCustomImportHandler(sourceChainId)}
           onSelect={(t) => {
             // TokenSelectorModal deals in TokenDisplay; map back to a
@@ -391,7 +401,7 @@ export default function SwapPage() {
           tokens={modalTokens}
           oppositeSymbol={inputToken?.symbol ?? ''}
           sideOpen="output"
-          canImport={typeof window !== 'undefined' && !!window.ethereum}
+          canImport={true}
           onCustomImport={makeCustomImportHandler(sourceChainId)}
           onSelect={(t) => {
             // TokenSelectorModal deals in TokenDisplay; map back to functional Token.
@@ -409,8 +419,6 @@ export default function SwapPage() {
           onClose={() => setShowSettings(false)}
         />
       )}
-      {/* WalletConnectPanel is design-pending for the connected-state menu (IMPL §3.2).
-          Wired later as a follow-up. */}
     </>
   )
 }
@@ -458,27 +466,29 @@ function makeCustomImportHandler(
 ): (addr: string) => Promise<TokenDisplay | null> {
   return async (addr: string): Promise<TokenDisplay | null> => {
     try {
-      const { ethers } = await import('ethers')
-      if (!window.ethereum) return null
-      const provider = new ethers.BrowserProvider(window.ethereum)
-      const erc20 = new ethers.Contract(
-        addr,
-        [
-          'function symbol() view returns (string)',
-          'function decimals() view returns (uint8)',
-        ],
-        provider,
-      )
-      const [symbol, decimals] = await Promise.all([
-        erc20.symbol(),
-        erc20.decimals(),
+      // Custom-token import reads ERC-20 metadata over RPC — no wallet
+      // signature needed. Use viem's public client (configured against the
+      // chain's transport in wagmiConfig) so this works regardless of
+      // whether the user has a wallet connected.
+      const [{ getPublicClient }, { erc20Abi, getAddress }, { wagmiConfig }] = await Promise.all([
+        import('wagmi/actions'),
+        import('viem'),
+        import('@/config/wagmi'),
       ])
+      const client = getPublicClient(wagmiConfig, { chainId })
+      if (!client) return null
+
+      const tokenAddr = getAddress(addr) as `0x${string}`
+      const [symbol, decimals] = await Promise.all([
+        client.readContract({ address: tokenAddr, abi: erc20Abi, functionName: 'symbol' }),
+        client.readContract({ address: tokenAddr, abi: erc20Abi, functionName: 'decimals' }),
+      ]) as [string, number]
 
       // Persist into solverTokens so the next open shows it
       const newToken: Token = {
         symbol,
         name: symbol,
-        address: ethers.getAddress(addr),
+        address: tokenAddr,
         decimals: Number(decimals),
         icon: symbol.charAt(0),
       }
@@ -498,7 +508,7 @@ function makeCustomImportHandler(
         iconClass: iconMap[sym] ?? 'unknown',
         balance: '0',
         usd: '$0.00',
-        address: ethers.getAddress(addr),
+        address: tokenAddr,
       }
     } catch (e) {
       console.error('Custom token import failed:', e)

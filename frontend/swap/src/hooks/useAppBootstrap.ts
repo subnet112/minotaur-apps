@@ -76,10 +76,32 @@ export function useAppBootstrap() {
           const deps = status?.deployments || {}
           const depValues = Array.isArray(deps) ? deps : Object.values(deps)
 
-          // Prefer a deployment on the current chain; fall back to the first
-          // order-ready deployment on any chain.
+          // Surface the set of order-ready chain IDs so the chain selector
+          // can restrict its options to where this App is actually deployed
+          // (instead of every chain the validator knows about).
+          const orderReadyChains = (depValues as any[])
+            .filter((d) => d?.contract_address && ORDER_READY.has(d?.status))
+            .map((d) => Number(d.chain_id))
+            .filter((id) => Number.isFinite(id))
+          const supported = Array.from(new Set(orderReadyChains))
+          store.setAppSupportedChains(supported)
+          console.log('[swap] app supported chains:', supported)
+
+          // If the current chainId isn't in the supported set, snap to the
+          // first supported one — otherwise the form sits with a chain the
+          // app can't service.
+          if (supported.length > 0 && !supported.includes(store.chainId)) {
+            store.setChainId(supported[0])
+            store.setSourceChainId(supported[0])
+          }
+
+          // Prefer a deployment on the (possibly newly-snapped) current chain;
+          // fall back to the first order-ready deployment on any chain.
+          const currentChainId = supported.includes(store.chainId)
+            ? store.chainId
+            : (supported[0] ?? store.chainId)
           const matching = (depValues as any[]).find(
-            (d) => d?.contract_address && ORDER_READY.has(d?.status) && d?.chain_id === store.chainId,
+            (d) => d?.contract_address && ORDER_READY.has(d?.status) && d?.chain_id === currentChainId,
           )
           const fallback = (depValues as any[]).find(
             (d) => d?.contract_address && ORDER_READY.has(d?.status),

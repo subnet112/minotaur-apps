@@ -174,7 +174,7 @@ export function useQuoteRequest() {
       store.setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.inputToken, store.outputToken, store.inputAmount, store.appId, store.chainId, store.walletAddress, store.managedWallet])
+  }, [store.inputToken, store.outputToken, store.inputAmount, store.appId, store.chainId, store.walletAddress])
 
   // Auto-fetch quote when inputs change
   useEffect(() => {
@@ -195,7 +195,7 @@ export function useQuoteRequest() {
       controller.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.inputToken, store.outputToken, store.inputAmount, store.walletAddress, store.managedWallet, store.chainId, store.appId])
+  }, [store.inputToken, store.outputToken, store.inputAmount, store.walletAddress, store.chainId, store.appId])
 
   return { requestQuote }
 }

@@ -25,18 +25,14 @@ interface SettingsSheetProps {
 
 const PRESETS = [0.5, 1, 2, 5] as const
 
-export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
+export default function SettingsSheet({ wallet: _wallet, onClose }: SettingsSheetProps) {
   // Read from store
   const slippageBps = useSwapStore((s) => s.slippageBps)
-  const storeAppId = useSwapStore((s) => s.appId)
   const unlimitedApproval = useSwapStore((s) => s.unlimitedApproval)
-  const walletMode = useSwapStore((s) => s.walletMode)
 
   // Actions
   const setSlippageBps = useSwapStore((s) => s.setSlippageBps)
-  const setAppId = useSwapStore((s) => s.setAppId)
   const setUnlimitedApproval = useSwapStore((s) => s.setUnlimitedApproval)
-  const setWalletMode = useSwapStore((s) => s.setWalletMode)
 
   const toast = useToast()
 
@@ -50,11 +46,6 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
   // Visual: map 10–5000 bps → 0–100% for slider fill/thumb
   // Ceiling at 5000 bps (50%) = 100% visual
   const slippageFillPct = Math.min(((slippageBps - 10) / (5000 - 10)) * 100, 100)
-
-  const signWithExternal = walletMode === 'external'
-
-  // Managed-only mode hides external toggles (matches v3 in the prototype)
-  const showExternalToggles = wallet !== 'managed'
 
   // Esc dismisses.
   useEffect(() => {
@@ -193,61 +184,25 @@ export default function SettingsSheet({ wallet, onClose }: SettingsSheetProps) {
             </p>
           </div>
 
-          {/* App ID */}
+          {/* Managed/external sign-mode toggle retired with the managed-wallet
+              flow removal. The unlimited-approval toggle below is independent
+              and stays. */}
           <div className="sw-settings-sec">
-            <div className="sw-settings-h">
-              <span className="lbl">App ID override</span>
-            </div>
-            <div className="sw-input">
-              <input
-                type="text"
-                placeholder="app_xxxxxxxxxxxx"
-                value={storeAppId}
-                onChange={(e) => setAppId(e.target.value)}
-              />
-            </div>
+            <button
+              className={`sw-toggle ${unlimitedApproval ? 'is-on' : ''}`.trim()}
+              type="button"
+              onClick={() => setUnlimitedApproval(!unlimitedApproval)}
+            >
+              <div className="name">Unlimited approval</div>
+              <div className="sw" role="switch" aria-checked={unlimitedApproval}>
+                <span className="knob" />
+              </div>
+            </button>
             <p className="sw-settings-help">
-              Override the target App Intent ID. <span className="b">Advanced / debug.</span>
+              <span className="b">On:</span> approve once, swap forever.{' '}
+              <span className="b">Off:</span> approve exact amount per swap.
             </p>
           </div>
-
-          {showExternalToggles && (
-            <>
-              <div className="sw-settings-sec">
-                <button
-                  className={`sw-toggle ${signWithExternal ? 'is-on' : ''}`.trim()}
-                  type="button"
-                  onClick={() => setWalletMode(signWithExternal ? 'managed' : 'external')}
-                >
-                  <div className="name">Sign with external wallet</div>
-                  <div className="sw" role="switch" aria-checked={signWithExternal}>
-                    <span className="knob" />
-                  </div>
-                </button>
-                <p className="sw-settings-help">
-                  When on, Minotaur prompts your <span className="b">MetaMask</span> for every
-                  order. When off, your managed wallet auto-signs.
-                </p>
-              </div>
-
-              <div className="sw-settings-sec">
-                <button
-                  className={`sw-toggle ${unlimitedApproval ? 'is-on' : ''}`.trim()}
-                  type="button"
-                  onClick={() => setUnlimitedApproval(!unlimitedApproval)}
-                >
-                  <div className="name">Unlimited approval</div>
-                  <div className="sw" role="switch" aria-checked={unlimitedApproval}>
-                    <span className="knob" />
-                  </div>
-                </button>
-                <p className="sw-settings-help">
-                  <span className="b">On:</span> approve once, swap forever.{' '}
-                  <span className="b">Off:</span> approve exact amount per swap.
-                </p>
-              </div>
-            </>
-          )}
         </div>
 
         <div className="sw-settings-footer">

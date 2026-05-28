@@ -205,9 +205,9 @@ function DebugBody({ wallet }: { wallet: DesignWalletMode }) {
   const quote = useSwapStore((s) => s.quote)
   const activeOrder = useSwapStore((s) => s.activeOrder)
 
-  // Active address: read individual fields for selector compatibility
+  // Active address: read individual fields for selector compatibility.
+  // Managed-wallet branch removed; external (RainbowKit) writes walletAddress.
   const activeAddress = useSwapStore((s) => {
-    if (s.walletMode === 'managed' && s.managedWallet) return s.managedWallet.address
     if (s.walletMode === 'bittensor' && s.bittensorAddress) return s.bittensorAddress
     return s.walletAddress
   })

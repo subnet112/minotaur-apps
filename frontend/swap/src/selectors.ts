@@ -12,7 +12,7 @@ import { TERMINAL_STATUSES } from '@/lib/orderStatus'
 // Minimal slice of the store we need. Avoids importing the store type to
 // keep selectors usable with synthetic test fixtures.
 interface SelectableState {
-  walletMode: 'external' | 'managed' | 'bittensor'
+  walletMode: 'external' | 'bittensor'
   walletConnected: boolean
   walletChainId: number | null
   sourceChainId: number
@@ -28,7 +28,6 @@ interface SelectableState {
   approving: boolean
   loading: boolean
   submitting: boolean
-  managedWallet: unknown | null
   bittensorProxySetup: boolean
 }
 
@@ -77,12 +76,9 @@ export function selectActionState(s: SelectableState): ActionState {
 }
 
 export function selectModeBlockVariant(s: SelectableState): ModeBlock | null {
-  if (s.walletMode === 'managed' && !s.managedWallet) return 'create-wallet'
-  if (s.walletMode === 'managed'
-      && s.managedWallet
-      && parseFloat(s.inputBalance ?? '0') === 0) {
-    return 'fund-wallet'
-  }
+  // 'create-wallet' / 'fund-wallet' variants retired with the managed-wallet
+  // flow removal. External (RainbowKit) handles its own connect UX; bittensor
+  // wallet still needs the substrate proxy banner.
   if (s.walletMode === 'external' && s.needsApproval && !s.approving) return 'approval'
   if (s.approving) return 'approving'
   if (s.inputToken?.native) return 'native-eth'
