@@ -2,12 +2,11 @@
  * WalletModeBlock — 00.26 Wallet-mode contextual block.
  *
  * Surfaces above the action button when the swap surface needs a setup
- * step before proceeding: create a managed wallet, fund it, approve an
- * external token, set up a Bittensor proxy, or just inform about a
- * native-ETH broadcast.
+ * step before proceeding: approve an external token, set up a Bittensor
+ * proxy, or just inform about a native-ETH broadcast.
  *
- * Visual-only. The CTA `onClick` is a no-op stub in this prototype;
- * the minotaur-apps team wires the real flow.
+ * Managed-wallet variants (create-wallet / fund-wallet) retired with
+ * the managed-wallet flow removal.
  *
  * Lifted markup mirrors components.html section 00.26 (line 10001 +).
  */
@@ -31,30 +30,6 @@ interface BlockConfig {
 }
 
 const CONFIG: Record<Exclude<ModeBlock, 'none'>, BlockConfig> = {
-  'create-wallet': {
-    modifier: '',
-    eyebrowMode: 'Managed',
-    eyebrowAction: 'Create wallet',
-    body: (
-      <>
-        One-click. Auto-signs orders, <span className="b">no extension needed.</span> Your
-        managed wallet stays scoped to Minotaur Swap and never leaves the browser.
-      </>
-    ),
-    cta: { label: 'Create managed wallet', ghost: false },
-  },
-  'fund-wallet': {
-    modifier: '',
-    eyebrowMode: 'Managed',
-    eyebrowAction: 'Fund wallet',
-    body: (
-      <>
-        Testnet faucet · sends <code>100 USDC</code> to your managed wallet at{' '}
-        <code>0x5a33…c108</code>. Hides as soon as balance &gt; 0.
-      </>
-    ),
-    cta: { label: 'Fund wallet', ghost: true },
-  },
   approval: {
     modifier: '',
     eyebrowMode: 'External',

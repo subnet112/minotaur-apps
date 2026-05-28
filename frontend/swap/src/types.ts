@@ -15,7 +15,10 @@ export interface SwapHistoryItem {
   txHash?: string | null
 }
 
-export type WalletMode = 'external' | 'managed' | 'bittensor'
+// Managed-wallet (Lit Protocol MPC) flow has been removed end-to-end. If it
+// ever comes back, restoring is a search/replace + re-adding the
+// create-wallet / fund-wallet ModeBlock variants.
+export type WalletMode = 'external' | 'bittensor'
 
 export type OrderStatusValue =
   | 'pending'
@@ -37,14 +40,14 @@ export type ToastVariant = 'success' | 'error' | 'info' | 'loading' | 'transient
 // aggregator/ can keep importing them from a stable path. The names match
 // the design tree's _state.ts / _mock.ts type exports verbatim.
 
-export type DesignWalletMode = 'disconnected' | 'managed' | 'metamask' | 'bittensor'
+export type DesignWalletMode = 'disconnected' | 'metamask' | 'bittensor'
 export type OrderStep = 'pending' | 'open' | 'solved' | 'scored' | 'consensus' | 'filled' | 'failed'
 export type ActionState =
   | 'disconnected' | 'wrong-network' | 'empty' | 'insufficient'
   | 'fetching' | 'no-route' | 'approving' | 'swap-ready'
   | 'sign-broadcast' | 'submitting' | 'awaiting-sig' | 'enter-recipient'
 export type ModeBlock =
-  | 'none' | 'create-wallet' | 'fund-wallet' | 'approval'
+  | 'none' | 'approval'
   | 'approving' | 'native-eth' | 'setup-proxy'
 export type Overlay = 'none' | 'wallet-panel' | 'token-from' | 'token-to' | 'settings'
 
@@ -106,6 +109,6 @@ export interface RecentSwapDisplay {
 export interface DebugInfoDisplay {
   appId: string
   chainId: string
-  walletMode: 'managed' | 'metamask' | 'bittensor' | 'disconnected'
+  walletMode: 'metamask' | 'bittensor' | 'disconnected'
   activeAddress: string
 }

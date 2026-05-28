@@ -8,7 +8,6 @@ interface SwapState {
   walletConnected: boolean
   walletAddress: string
   walletChainId: number | null
-  managedWallet: WalletInfo | null
 
   // Bittensor wallet (substrate)
   bittensorAddress: string
@@ -25,6 +24,11 @@ interface SwapState {
   contractAddress: string  // on-chain contract for ERC-20 approvals
   unlimitedApproval: boolean
   slippageBps: number      // slippage tolerance in basis points (100 = 1%)
+
+  /** Chain IDs where the active app has an order-ready deployment.
+   *  Populated by useAppBootstrap from /v1/apps/{id}/status .deployments;
+   *  filtered to status ∈ {'active','solved'}. Empty until first fetch. */
+  appSupportedChains: number[]
 
   // Dynamic token lists from solver
   solverTokens: Record<number, Token[]>  // chain_id → tokens
@@ -78,7 +82,6 @@ interface SwapActions {
   setWalletConnected: (connected: boolean) => void
   setWalletAddress: (address: string) => void
   setWalletChainId: (chainId: number | null) => void
-  setManagedWallet: (wallet: WalletInfo | null) => void
 
   // Bittensor wallet
   setBittensorAddress: (address: string) => void
@@ -91,6 +94,7 @@ interface SwapActions {
   // App
   setAppId: (appId: string) => void
   setAppLoaded: (loaded: boolean) => void
+  setAppSupportedChains: (chainIds: number[]) => void
   setContractAddress: (addr: string) => void
   setUnlimitedApproval: (v: boolean) => void
   setSlippageBps: (v: number) => void
@@ -152,7 +156,6 @@ const initialState: SwapState = {
   walletConnected: false,
   walletAddress: '',
   walletChainId: null,
-  managedWallet: null,
 
   bittensorAddress: '',
   bittensorConnected: false,
@@ -166,6 +169,7 @@ const initialState: SwapState = {
   contractAddress: '',
   unlimitedApproval: false,
   slippageBps: 100,  // 1% default
+  appSupportedChains: [],
   solverTokens: {},
 
   chainId: DEFAULT_CHAIN_ID,
@@ -209,7 +213,6 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   setWalletConnected: (connected) => set({ walletConnected: connected }),
   setWalletAddress: (address) => set({ walletAddress: address }),
   setWalletChainId: (chainId) => set({ walletChainId: chainId }),
-  setManagedWallet: (wallet) => set({ managedWallet: wallet }),
 
   // Bittensor wallet
   setBittensorAddress: (address) => set({ bittensorAddress: address }),
@@ -222,6 +225,7 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   // App
   setAppId: (appId) => set({ appId }),
   setAppLoaded: (loaded) => set({ appLoaded: loaded }),
+  setAppSupportedChains: (chainIds) => set({ appSupportedChains: Array.from(new Set(chainIds)) }),
   setContractAddress: (addr) => set({ contractAddress: addr }),
   setUnlimitedApproval: (v) => set({ unlimitedApproval: v }),
   setSlippageBps: (v) => set({ slippageBps: v }),
@@ -279,7 +283,7 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   setApproving: (v) => set({ approving: v }),
   checkAllowance: async () => {
     const s = get()
-    if (s.walletMode !== 'external' || !window.ethereum || !s.inputToken || s.inputToken.native) {
+    if (s.walletMode !== 'external' || !s.inputToken || s.inputToken.native) {
       set({ needsApproval: false })
       return
     }
@@ -291,13 +295,23 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
       return
     }
     try {
-      const { ethers } = await import('ethers')
-      const provider = new ethers.BrowserProvider(window.ethereum)
-      const erc20 = new ethers.Contract(s.inputToken.address, [
-        'function allowance(address,address) view returns (uint256)',
-      ], provider)
-      const allowance = await erc20.allowance(addr, contract)
-      set({ needsApproval: BigInt(allowance) < BigInt(String(amount)) })
+      // Use viem's read path via the wagmi-config public client — same
+      // RPC as the rest of the swap, works regardless of which connector
+      // (MetaMask, Rabby, WalletConnect, Coinbase, …) is active.
+      const [{ getPublicClient }, { erc20Abi }, { wagmiConfig }] = await Promise.all([
+        import('wagmi/actions'),
+        import('viem'),
+        import('@/config/wagmi'),
+      ])
+      const client = getPublicClient(wagmiConfig, { chainId: s.chainId })
+      if (!client) { set({ needsApproval: false }); return }
+      const allowance = await client.readContract({
+        address: s.inputToken.address as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [addr as `0x${string}`, contract as `0x${string}`],
+      })
+      set({ needsApproval: BigInt(allowance as bigint) < BigInt(String(amount)) })
     } catch {
       set({ needsApproval: false })
     }
@@ -357,7 +371,6 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   // Derived
   getActiveAddress: () => {
     const s = get()
-    if (s.walletMode === 'managed' && s.managedWallet) return s.managedWallet.address
     if (s.walletMode === 'bittensor' && s.bittensorAddress) return s.bittensorAddress
     return s.walletAddress
   },
