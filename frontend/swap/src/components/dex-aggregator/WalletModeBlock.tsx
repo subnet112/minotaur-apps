@@ -17,6 +17,8 @@ interface WalletModeBlockProps {
   variant: Exclude<ModeBlock, 'none'>
   /** Called when the block's CTA is clicked. Visual-only — no real wiring. */
   onCtaClick?: () => void
+  /** Disable the CTA (e.g. Approve) until the alpha disclaimer is acknowledged. */
+  disabled?: boolean
 }
 
 interface BlockConfig {
@@ -80,7 +82,7 @@ const CONFIG: Record<Exclude<ModeBlock, 'none'>, BlockConfig> = {
   },
 }
 
-export default function WalletModeBlock({ variant, onCtaClick }: WalletModeBlockProps) {
+export default function WalletModeBlock({ variant, onCtaClick, disabled = false }: WalletModeBlockProps) {
   const cfg = CONFIG[variant]
   return (
     <div className={`sw-mode ${cfg.modifier}`.trim()}>
@@ -97,6 +99,8 @@ export default function WalletModeBlock({ variant, onCtaClick }: WalletModeBlock
           className={`sw-mode-btn ${cfg.cta.ghost ? '' : 'is-primary'}`.trim()}
           type="button"
           onClick={onCtaClick}
+          disabled={disabled}
+          style={disabled ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
         >
           <span>{cfg.cta.label}</span>
           <span className="arr" aria-hidden="true">→</span>

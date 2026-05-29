@@ -18,6 +18,9 @@ import type { ActionState } from '@/types'
 interface ActionButtonProps {
   state: ActionState
   onClick: () => void
+  /** Force the button disabled regardless of state — used to block
+   *  funds-moving actions until the alpha disclaimer is acknowledged. */
+  forceDisabled?: boolean
 }
 
 interface StateConfig {
@@ -45,13 +48,13 @@ const STATE_CONFIG: Record<ActionState, StateConfig> = {
   'enter-recipient':{ modifier: 'is-empty',        label: 'Enter recipient',    disabled: true,  glyph: 'none' },
 }
 
-export default function ActionButton({ state, onClick }: ActionButtonProps) {
+export default function ActionButton({ state, onClick, forceDisabled = false }: ActionButtonProps) {
   const cfg = STATE_CONFIG[state]
   return (
     <button
       className={`sw-cta ${cfg.modifier}`.trim()}
       type="button"
-      disabled={cfg.disabled}
+      disabled={cfg.disabled || forceDisabled}
       onClick={onClick}
     >
       {cfg.glyph === 'spinner' && <span className="spinner" aria-hidden="true" />}

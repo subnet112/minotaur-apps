@@ -9,7 +9,7 @@
  *   - StateSwitcher is dropped (URL-state previewer is meaningless with
  *     real Zustand; useDevPreviewState handles URL-driven preview in dev)
  */
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useSwapStore } from '@/store'
 import { selectActionState, selectModeBlockVariant } from '@/selectors'
 import {
@@ -100,6 +100,11 @@ export default function SwapPage() {
   const externalQuotes = useComparisonQuotes()
   // ERC-20 approval flow: refreshes needsApproval and exposes the approve TX.
   const { approve } = useApproval()
+
+  // Alpha-risk acknowledgement. Gates both funds-moving actions (Approve in
+  // the mode block + Swap/Sign in the action button) until the user ticks the
+  // disclaimer. Session-scoped (resets on reload) — re-consent each visit.
+  const [accepted, setAccepted] = useState(false)
 
   // Read slices from store
   const walletMode = useSwapStore((s) => s.walletMode)
@@ -233,7 +238,8 @@ export default function SwapPage() {
             <div className="sw-stack">
               <WalletModeBlock
                 variant={modeBlockVariant}
-                onCtaClick={modeBlockVariant === 'approval' ? approve : undefined}
+                onCtaClick={modeBlockVariant === 'approval' && accepted ? approve : undefined}
+                disabled={modeBlockVariant === 'approval' && !accepted}
               />
             </div>
           )}
@@ -315,6 +321,8 @@ export default function SwapPage() {
             wallet={designWallet}
             actionState={actionState}
             onActionClick={handleAction}
+            acknowledged={accepted}
+            onAcknowledgedChange={setAccepted}
           />
 
           {quote && !activeOrder && inputToken && outputToken && (
