@@ -75,6 +75,9 @@ function toTokenDisplay(t: Token): TokenDisplay {
   }
 }
 
+/** localStorage key for the persisted alpha-risk acknowledgement. */
+const ALPHA_ACK_KEY = 'minotaur:alpha-acknowledged'
+
 /** Fallback TokenDisplay for when no token is selected yet. */
 const PLACEHOLDER_TOKEN: TokenDisplay = {
   symbol: '—',
@@ -103,8 +106,24 @@ export default function SwapPage() {
 
   // Alpha-risk acknowledgement. Gates both funds-moving actions (Approve in
   // the mode block + Swap/Sign in the action button) until the user ticks the
-  // disclaimer. Session-scoped (resets on reload) — re-consent each visit.
-  const [accepted, setAccepted] = useState(false)
+  // disclaimer. Persisted in localStorage so consent survives reloads; the
+  // try/catch covers private-mode / storage-disabled browsers.
+  const [accepted, setAcceptedState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(ALPHA_ACK_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const setAccepted = (v: boolean) => {
+    setAcceptedState(v)
+    try {
+      if (v) localStorage.setItem(ALPHA_ACK_KEY, '1')
+      else localStorage.removeItem(ALPHA_ACK_KEY)
+    } catch {
+      /* storage unavailable — fall back to in-memory only */
+    }
+  }
 
   // Read slices from store
   const walletMode = useSwapStore((s) => s.walletMode)
