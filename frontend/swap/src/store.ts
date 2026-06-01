@@ -2,6 +2,30 @@ import { create } from 'zustand'
 import type { Token, QuoteResult, OrderResult, WalletInfo, WalletMode, SwapHistoryItem } from './types'
 import { TOKENS, DEFAULT_CHAIN_ID } from '@/config/chains'
 
+/** Cached solver-token list per chain. The validator's /v1/chains/{id}/tokens
+ *  is ~400ms server-side and gated by a CORS preflight on first request, so
+ *  without a cache the dropdowns stay empty for ~800ms on every refresh.
+ *  Stale-while-revalidate: hydrate the store from this on init, then
+ *  useAppBootstrap fetches fresh and the setter below writes through. */
+const TOKENS_CACHE_KEY = 'minotaur:solver-tokens:v1'
+
+function loadTokensCache(): Record<number, Token[]> {
+  try {
+    const raw = localStorage.getItem(TOKENS_CACHE_KEY)
+    return raw ? (JSON.parse(raw) as Record<number, Token[]>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveTokensCache(t: Record<number, Token[]>): void {
+  try {
+    localStorage.setItem(TOKENS_CACHE_KEY, JSON.stringify(t))
+  } catch {
+    /* storage unavailable — fall back to in-memory only */
+  }
+}
+
 interface SwapState {
   // Wallet
   walletMode: WalletMode
@@ -170,7 +194,7 @@ const initialState: SwapState = {
   unlimitedApproval: false,
   slippageBps: 100,  // 1% default
   appSupportedChains: [],
-  solverTokens: {},
+  solverTokens: loadTokensCache(),
 
   chainId: DEFAULT_CHAIN_ID,
   sourceChainId: DEFAULT_CHAIN_ID,
@@ -229,7 +253,11 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   setContractAddress: (addr) => set({ contractAddress: addr }),
   setUnlimitedApproval: (v) => set({ unlimitedApproval: v }),
   setSlippageBps: (v) => set({ slippageBps: v }),
-  setSolverTokens: (chainId, tokens) => set((s) => ({ solverTokens: { ...s.solverTokens, [chainId]: tokens } })),
+  setSolverTokens: (chainId, tokens) => set((s) => {
+    const next = { ...s.solverTokens, [chainId]: tokens }
+    saveTokensCache(next)
+    return { solverTokens: next }
+  }),
 
   // Form
   setChainId: (chainId) => {
