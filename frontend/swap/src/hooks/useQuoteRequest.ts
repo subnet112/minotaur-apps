@@ -168,15 +168,39 @@ export function useQuoteRequest() {
     } catch (e) {
       if (signal.aborted) return
       const msg = (e as Error).message
-      store.setError(msg)
-      toast.error({ title: 'Quote unavailable', message: msg })
+      // The validator's /quote endpoint is rate-limited per IP
+      // (default 30/min, see QUOTE_RATE_LIMIT_PER_MINUTE in orders.py).
+      // Surface as a friendly transient toast — the current quote
+      // (if any) stays on screen and useQuoteExpiry will refetch on
+      // expiry, so the user doesn't need to do anything.
+      const isRateLimited =
+        (e as { status?: number } | undefined)?.status === 429 ||
+        /rate limit|429|too many requests/i.test(msg)
+      if (isRateLimited) {
+        toast.transient({
+          title: 'Quote rate-limited',
+          message: 'Slow down — using the previous quote until the limit resets.',
+        })
+      } else {
+        store.setError(msg)
+        toast.error({ title: 'Quote unavailable', message: msg })
+      }
     } finally {
       store.setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.inputToken, store.outputToken, store.inputAmount, store.appId, store.chainId, store.walletAddress])
 
-  // Auto-fetch quote when inputs change
+  // Auto-fetch quote when inputs *actually* change.
+  //
+  // The dep array uses stable identifiers (token addresses, amount string,
+  // chain id, app id, wallet address) instead of the inputToken/outputToken
+  // object references — otherwise every bootstrap remap or token-list
+  // refresh re-creates the same token object and re-fires the effect,
+  // burning quotes against the validator's 30/min/IP rate limit
+  // (QUOTE_RATE_LIMIT_PER_MINUTE in orders.py). With stable deps the only
+  // refetch triggers are real input changes; quote freshness is otherwise
+  // maintained by useQuoteExpiry's TTL-driven re-quote.
   useEffect(() => {
     store.clearQuote()
     store.setActiveOrder(null)
@@ -195,7 +219,14 @@ export function useQuoteRequest() {
       controller.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.inputToken, store.outputToken, store.inputAmount, store.walletAddress, store.chainId, store.appId])
+  }, [
+    store.inputToken?.address,
+    store.outputToken?.address,
+    store.inputAmount,
+    store.walletAddress,
+    store.chainId,
+    store.appId,
+  ])
 
   return { requestQuote }
 }
