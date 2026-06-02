@@ -47,10 +47,28 @@ contract MockDex {
     }
 }
 
+/// @title MockWETH - MockToken plus native wrap/unwrap (deposit/withdraw), to
+///        exercise the auto-wrap (input) and auto-unwrap (output) paths.
+contract MockWETH is MockToken {
+    constructor() MockToken("Wrapped ETH", "WETH", 18) {}
+
+    function deposit() external payable {
+        _mint(msg.sender, msg.value);
+    }
+
+    function withdraw(uint256 amount) external {
+        _burn(msg.sender, amount);
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "MockWETH: ETH send failed");
+    }
+
+    receive() external payable {}
+}
+
 contract DexAggregatorTest is Test {
     DexAggregatorApp public app;
     ValidatorRegistry public registry;
-    MockToken public weth;
+    MockWETH public weth;
     MockToken public usdc;
     MockDex public dex;
 
@@ -83,7 +101,7 @@ contract DexAggregatorTest is Test {
         _sortValidators();
 
         // Deploy tokens
-        weth = new MockToken("Wrapped ETH", "WETH", 18);
+        weth = new MockWETH();
         usdc = new MockToken("USD Coin", "USDC", 6);
 
         // Deploy DEX and fund with reserves
@@ -121,6 +139,8 @@ contract DexAggregatorTest is Test {
     function test_constructor() public view {
         assertEq(app.feeBps(), 5000);
         assertEq(app.feeCollector(), feeCollector);
+        assertEq(app.volumeCapBps(), 98, "volume cap defaults to 0.98%");
+        assertEq(app.DEFAULT_VOLUME_CAP_BPS(), 98);
         assertTrue(app.registeredIntents(app.SWAP_SELECTOR()));
     }
 
@@ -171,6 +191,23 @@ contract DexAggregatorTest is Test {
         app.setFeeBps(10001);
     }
 
+    function test_setVolumeCapBps() public {
+        vm.prank(relayerAddr);
+        app.setVolumeCapBps(50);
+        assertEq(app.volumeCapBps(), 50);
+    }
+
+    function test_setVolumeCapBps_revert_tooHigh() public {
+        vm.prank(relayerAddr);
+        vm.expectRevert("Cap too high");
+        app.setVolumeCapBps(10001);
+    }
+
+    function test_setVolumeCapBps_revert_nonRelayer() public {
+        vm.expectRevert("Only relayer");
+        app.setVolumeCapBps(50);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //                     PLATFORM FEE TESTS
     // ═══════════════════════════════════════════════════════════════════════
@@ -213,6 +250,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
             platformFee,
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false
         );
 
@@ -277,11 +315,12 @@ contract DexAggregatorTest is Test {
         // surplus   = 200e6 (= 2000e6 - 1800e6)
         // slip fee  = 100e6 (50% of surplus)
         // user      = 1900e6
-        uint256 expectedSlippageFee = ((2000e6 - minAmountOut) * app.feeBps()) / 10000;
-        assertEq(usdc.balanceOf(feeCollector), expectedSlippageFee,
-            "positive-slippage fee paid to feeCollector in tokenOut");
-        assertEq(usdc.balanceOf(userAddr), 2000e6 - expectedSlippageFee,
-            "user receives gained - slippage fee");
+        // quotedOutput == 0 ⇒ no app fee. The protocol fee was paid in WETH
+        // from the paymaster above; the full USDC output goes to the user.
+        assertEq(usdc.balanceOf(feeCollector), 0,
+            "no app fee when quotedOutput is unset");
+        assertEq(usdc.balanceOf(userAddr), 2000e6,
+            "user receives full output (no app fee)");
 
         // No WETH ever left the user beyond amountIn (no separate fee pull).
         assertEq(weth.balanceOf(userAddr), 0, "all user WETH went to the swap");
@@ -301,6 +340,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
             platformFee,
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false
         );
 
@@ -384,6 +424,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
             platformFee,
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false
         );
 
@@ -424,6 +465,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
             platformFee,
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false
         );
 
@@ -475,18 +517,22 @@ contract DexAggregatorTest is Test {
     }
 
     function test_swap_positiveSlippage() public {
-        // Set DEX rate to give 20% more than minimum
-        dex.setRate(2160); // 1 WETH = 2160 USDC (20% above 1800)
+        // CoW-style: the app fee is a share of improvement OVER the quoted
+        // output, not over minAmountOut. Execution (2160) beats the quote
+        // (2120) by 40 USDC; the app takes 50% of that 40 = 20 USDC. Uncapped
+        // here because 20 < the 0.98% volume cap (~21.17 USDC).
+        dex.setRate(2160); // 1 WETH = 2160 USDC
 
         uint256 amountIn = 1e18;
         uint256 minAmountOut = 1800e6;
+        uint256 quotedOutput = 2120e6; // what we quoted the user (net)
         weth.mint(userAddr, amountIn);
         vm.prank(userAddr);
         weth.approve(address(app), amountIn);
 
         bytes32 orderId = keccak256("slippage_swap");
         (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
-            _buildSwapOrderAndPlan(orderId, amountIn, minAmountOut, userAddr);
+            _buildSwapWithQuote(orderId, amountIn, minAmountOut, userAddr, app, quotedOutput);
 
         vm.prank(relayerAddr);
         (uint256 score, bool valid) = app.scoreIntent(order, plan);
@@ -494,11 +540,9 @@ contract DexAggregatorTest is Test {
         assertTrue(valid);
         assertGt(score, 5000, "Score should be above 5000 with surplus");
 
-        // Surplus: 2160 - 1800 = 360 USDC
-        // Fee: 50% of 360 = 180 USDC
-        // User gets: 2160 - 180 = 1980 USDC
-        assertEq(usdc.balanceOf(userAddr), 1980e6, "User gets output minus fee");
-        assertEq(usdc.balanceOf(feeCollector), 180e6, "Fee collector gets 50% of surplus");
+        // improvement = 2160 - 2120 = 40 USDC; fee = 50% = 20 USDC (uncapped)
+        assertEq(usdc.balanceOf(feeCollector), 20e6, "app fee = 50% of improvement over quote");
+        assertEq(usdc.balanceOf(userAddr), 2140e6, "user gets gained - app fee");
     }
 
     function test_swap_noFeeWhenZeroFeeBps() public {
@@ -563,6 +607,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(weth), amountIn, uint256(1e18), userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
             uint256(0), // platformFeeWei
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false       // unwrapOutput
         );
 
@@ -634,6 +679,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
             uint256(0), // platformFeeWei
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false       // unwrapOutput
         );
 
@@ -772,9 +818,9 @@ contract DexAggregatorTest is Test {
         vm.prank(relayerAddr);
         app.executeIntent(order, plan, userSig, validatorSigs);
 
-        // Output: 2000 USDC. Surplus: 200 USDC. Fee: 100 USDC. User: 1900 USDC.
-        assertEq(usdc.balanceOf(userAddr), 1900e6, "User gets output minus fee");
-        assertEq(usdc.balanceOf(feeCollector), 100e6, "Fee collector gets fee");
+        // Output: 2000 USDC. quotedOutput == 0 in this order ⇒ no app fee.
+        assertEq(usdc.balanceOf(userAddr), 2000e6, "user gets full output (no app fee)");
+        assertEq(usdc.balanceOf(feeCollector), 0, "no app fee when quotedOutput unset");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -797,7 +843,7 @@ contract DexAggregatorTest is Test {
         vm.prank(relayerAddr);
         vm.expectEmit(true, true, false, true);
         emit DexAggregatorApp.SwapExecuted(
-            orderId, userAddr, address(weth), address(usdc), amountIn, 2000e6, 100e6
+            orderId, userAddr, address(weth), address(usdc), amountIn, 2000e6, 0
         );
         app.scoreIntent(order, plan);
     }
@@ -835,6 +881,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             permitDeadline, v, r, s,
             uint256(0), // platformFeeWei
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false       // unwrapOutput
         );
 
@@ -897,6 +944,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(block.timestamp + 3600), uint8(27), bytes32(uint256(1)), bytes32(uint256(2)),
             uint256(0), // platformFeeWei
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false       // unwrapOutput
         );
 
@@ -986,6 +1034,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
             uint256(0), // platformFeeWei
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false       // unwrapOutput
         );
 
@@ -1059,6 +1108,7 @@ contract DexAggregatorTest is Test {
             address(weth), address(usdc), amountIn, minAmountOut, userAddr,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
             uint256(0), // platformFeeWei
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false       // unwrapOutput
         );
 
@@ -1110,6 +1160,7 @@ contract DexAggregatorTest is Test {
         bytes memory intentParams = abi.encode(
             address(weth), amountIn, minBridged, userAddr,
             uint256(0), // platformFeeWei
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false       // unwrapOutput
         );
 
@@ -1170,6 +1221,7 @@ contract DexAggregatorTest is Test {
         bytes memory intentParams = abi.encode(
             address(weth), amountIn, minBridged, userAddr,
             uint256(0), // platformFeeWei
+            uint256(0), // quotedOutput (0 ⇒ no app fee)
             false       // unwrapOutput
         );
 
@@ -1311,6 +1363,145 @@ contract DexAggregatorTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    //              COW-STYLE APP FEE (improvement over the quote)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_appFee_cappedAtVolumeCap() public {
+        // Large improvement over the quote: 50% would exceed the 0.98% volume
+        // cap, so the fee is clamped down to the cap.
+        dex.setRate(2160); // gained = 2160e6
+        uint256 amountIn = 1e18; uint256 minOut = 1800e6; uint256 quoted = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr); weth.approve(address(app), amountIn);
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapWithQuote(keccak256("fee_capped"), amountIn, minOut, userAddr, app, quoted);
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+        assertTrue(valid);
+        // improvement = 360e6; 50% = 180e6; cap = 2160e6*98/10000 = 21.168e6 → fee = cap
+        uint256 cap = 2160e6 * 98 / 10000; // 21_168_000
+        assertEq(usdc.balanceOf(feeCollector), cap, "fee clamped to 0.98% volume cap");
+        assertEq(usdc.balanceOf(userAddr), 2160e6 - cap, "user gets gained - capped fee");
+    }
+
+    function test_appFee_clampedToUserMin() public {
+        // A tight minOut: the fee may never push the user below the minimum
+        // they signed — the (gained - minOut) clamp wins even over the cap.
+        dex.setRate(2160); // gained = 2160e6
+        uint256 amountIn = 1e18; uint256 minOut = 2150e6; uint256 quoted = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr); weth.approve(address(app), amountIn);
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapWithQuote(keccak256("fee_minclamp"), amountIn, minOut, userAddr, app, quoted);
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+        assertTrue(valid);
+        // surplusOverMin = 10e6; cap = 21.168e6; 50%*improvement = 180e6
+        // → fee = min(180e6, 21.168e6, 10e6) = 10e6; user gets exactly minOut.
+        assertEq(usdc.balanceOf(feeCollector), 10e6, "fee clamped to surplus over user min");
+        assertEq(usdc.balanceOf(userAddr), minOut, "user always receives at least their signed minimum");
+    }
+
+    function test_appFee_zeroAtOrBelowQuote() public {
+        // Execution does not beat the quote → no fee.
+        dex.setRate(2160); // gained = 2160e6
+        uint256 amountIn = 1e18; uint256 minOut = 1800e6; uint256 quoted = 2200e6; // > gained
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr); weth.approve(address(app), amountIn);
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapWithQuote(keccak256("fee_atquote"), amountIn, minOut, userAddr, app, quoted);
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+        assertTrue(valid);
+        assertEq(usdc.balanceOf(feeCollector), 0, "no fee when execution <= quote");
+        assertEq(usdc.balanceOf(userAddr), 2160e6, "user keeps the full output");
+    }
+
+    function test_appFee_zeroWhenQuotedUnset() public {
+        // quotedOutput == 0 disables the app fee even with large surplus.
+        dex.setRate(2160);
+        uint256 amountIn = 1e18; uint256 minOut = 1800e6;
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr); weth.approve(address(app), amountIn);
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapWithQuote(keccak256("fee_noquote"), amountIn, minOut, userAddr, app, 0);
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+        assertTrue(valid);
+        assertEq(usdc.balanceOf(feeCollector), 0, "no fee when quotedOutput is 0");
+        assertEq(usdc.balanceOf(userAddr), 2160e6, "user keeps the full output");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //              AUTO-UNWRAP NATIVE OUTPUT (Ethereum + Base)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function test_swap_unwrapNativeOutput_withFee() public {
+        // tokenOut == WETH and unwrapOutput == true → the user must receive
+        // NATIVE ETH, not WETH. Exercises the auto-unwrap path (IWETH.withdraw
+        // + native send) together with the CoW-style app fee, which stays in
+        // WETH at the feeCollector. Same code on Ethereum and Base — only
+        // wrappedNativeToken differs by chain.
+        MockDex wdex = new MockDex();
+        wdex.setDecimals(18, 18);
+        wdex.setRate(1);                 // 1:1 (mock units)
+        weth.mint(address(wdex), 10e18); // WETH reserves for the dex to pay out
+        vm.deal(address(weth), 5e18);    // ETH backing the MockWETH.withdraw()
+
+        uint256 amountIn = 2e18;
+        uint256 minOut = 1.5e18;
+        uint256 quoted = 1.99e18;        // improvement = 0.01e18 → fee = 0.005e18 (uncapped)
+
+        usdc.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        usdc.approve(address(app), amountIn);
+
+        bytes memory intentParams = abi.encode(
+            address(usdc), address(weth), amountIn, minOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            uint256(0),  // platformFeeWei (none — focus on app fee + unwrap)
+            quoted,      // quotedOutput
+            true         // unwrapOutput → deliver native ETH
+        );
+
+        bytes32 orderId = keccak256("unwrap_swap");
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId, app: address(app), intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams, submittedBy: userAddr, chainId: block.chainid,
+            deadline: block.timestamp + 3600, nonce: 0, perpetual: false,
+            maxExecutions: 1, cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](2);
+        calls[0] = IAppIntentBase.Call({
+            target: address(usdc), value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(wdex), type(uint256).max))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(wdex), value: 0,
+            callData: abi.encodeCall(wdex.swap, (address(usdc), address(weth), amountIn, 0, address(app)))
+        });
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls, deadline: order.deadline, nonce: 0, metadata: ""
+        });
+
+        uint256 userEthBefore = userAddr.balance;
+
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+        assertTrue(valid, "unwrap swap should succeed");
+
+        // gained = 2e18 WETH; improvement = 0.01e18; fee = 0.005e18 (uncapped).
+        uint256 expectedFee = 0.005e18;
+        uint256 expectedUser = 2e18 - expectedFee; // delivered as native ETH
+
+        assertEq(userAddr.balance - userEthBefore, expectedUser, "user receives native ETH (unwrapped)");
+        assertEq(weth.balanceOf(userAddr), 0, "user holds no WETH (it was unwrapped)");
+        assertEq(weth.balanceOf(feeCollector), expectedFee, "app fee stays in WETH at feeCollector");
+        assertEq(weth.balanceOf(address(app)), 0, "app holds no residual WETH");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //                         HELPERS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -1336,11 +1527,27 @@ contract DexAggregatorTest is Test {
         IAppIntentBase.IntentOrder memory order,
         IAppIntentBase.ExecutionPlan memory plan
     ) {
+        // Default: quotedOutput = 0 ⇒ no app fee (keeps fee-agnostic tests simple)
+        return _buildSwapWithQuote(orderId, amountIn, minAmountOut, receiver, targetApp, 0);
+    }
+
+    function _buildSwapWithQuote(
+        bytes32 orderId,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        address receiver,
+        DexAggregatorApp targetApp,
+        uint256 quotedOutput
+    ) internal view returns (
+        IAppIntentBase.IntentOrder memory order,
+        IAppIntentBase.ExecutionPlan memory plan
+    ) {
         bytes memory intentParams = abi.encode(
             address(weth), address(usdc), amountIn, minAmountOut, receiver,
             uint256(0), uint8(0), bytes32(0), bytes32(0),
-            uint256(0), // platformFeeWei (fee trailer)
-            false       // unwrapOutput
+            uint256(0),   // platformFeeWei (fee trailer)
+            quotedOutput, // quotedOutput — CoW-style app-fee reference
+            false         // unwrapOutput
         );
 
         order = IAppIntentBase.IntentOrder({
