@@ -6,7 +6,7 @@ import { formatAmount, shorten } from '../utils'
 import { classifyOrderStatus } from '@/lib/orderStatus'
 import * as api from '@/api/client'
 import { useWalletClient, usePublicClient } from 'wagmi'
-import { keccak256, toBytes, encodeAbiParameters, slice, type Address } from 'viem'
+import { keccak256, toBytes, type Address } from 'viem'
 
 /**
  * Order submission hook: handles submit + ERC-20 approval + EIP-712 signing + polling.
@@ -282,31 +282,33 @@ export function useOrderSubmission() {
           // string or bytes, so we encode strings as utf-8 first.
           const orderIdHash = keccak256(toBytes(order.order_id))
 
-          const intentParamsHex = order.params?.intent_params_hex
-            ? ('0x' + (order.params.intent_params_hex as string)) as `0x${string}`
-            : encodeAbiParameters(
-                [
-                  { type: 'address' }, { type: 'address' },
-                  { type: 'uint256' }, { type: 'uint256' },
-                  { type: 'address' }, { type: 'uint256' },
-                  { type: 'uint8' }, { type: 'bytes32' }, { type: 'bytes32' },
-                ],
-                [
-                  orderParams.input_token as Address,
-                  orderParams.output_token as Address,
-                  BigInt(orderParams.input_amount || '0'),
-                  BigInt(orderParams.min_output_amount || '0'),
-                  addr as Address,
-                  0n, 0,
-                  ('0x' + '00'.repeat(32)) as `0x${string}`,
-                  ('0x' + '00'.repeat(32)) as `0x${string}`,
-                ],
-              )
-
+          // Authoritative intent params come from the validator (which
+          // knows the current contract's encoding — e.g. 12-field SWAP
+          // post-CoW-fee). We deliberately do NOT reconstruct them
+          // client-side: a guess that's even one field off produces a
+          // valid-looking signature that the contract reverts on with a
+          // cryptic decode error. Fail loud instead so the user/dev sees
+          // exactly what the server didn't supply.
+          const intentParamsHexRaw = order.params?.intent_params_hex as string | undefined
+          if (!intentParamsHexRaw) {
+            throw new Error(
+              "Validator response is missing intent_params_hex — can't sign without the " +
+              "authoritative param encoding. This is a server-side issue; retry shortly.",
+            )
+          }
+          const intentParamsHex = ('0x' + intentParamsHexRaw) as `0x${string}`
           const paramsHash = keccak256(intentParamsHex)
-          const intentSelector = (order.params?.intent_selector
-            ? ('0x' + order.params.intent_selector) as `0x${string}`
-            : slice(keccak256(toBytes('swap(address,address,uint256,uint256,address)')), 0, 4))
+
+          // Same reasoning for the intent selector: it's per-app-per-intent
+          // (swap, bridge, ...) and the server is the source of truth.
+          const intentSelectorRaw = order.params?.intent_selector as string | undefined
+          if (!intentSelectorRaw) {
+            throw new Error(
+              "Validator response is missing intent_selector — can't sign without the " +
+              "authoritative selector. This is a server-side issue; retry shortly.",
+            )
+          }
+          const intentSelector = ('0x' + intentSelectorRaw) as `0x${string}`
 
           // 2^256 - 1 — matches the canonical sentinel-nonce convention used
           // by the relayer (skips on-chain nonce verification) and the new
