@@ -77,13 +77,38 @@ export function useApproval() {
       })
 
       // Wait for the receipt before refreshing allowance so the read sees
-      // the new approval state.
+      // the new approval state. waitForTransactionReceipt resolves on
+      // reverted txs too — the status field tells us the truth.
+      let txSucceeded = true
       if (publicClient) {
-        await publicClient.waitForTransactionReceipt({ hash: txHash })
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+        txSucceeded = receipt.status === 'success'
       }
 
-      // Refresh allowance — needsApproval should flip to false.
-      await store.checkAllowance()
+      if (!txSucceeded) {
+        toast.update(toastId, {
+          variant: 'error',
+          title: 'Approval reverted',
+          message: 'The approval transaction reverted on-chain.',
+        })
+        return
+      }
+
+      // Refresh allowance for accuracy, but force-clear `needsApproval`
+      // afterwards: a load-balanced public RPC node can return the
+      // pre-approval allowance for a short window after the tx mines
+      // (the node we read from may lag the one we sent through), which
+      // would otherwise leave the "Approve" button stuck on screen.
+      // Force-clearing keeps the user unblocked; the next natural
+      // refresh (amount/token/chain change) corrects the cached value
+      // if anything's off.
+      try {
+        await store.checkAllowance()
+      } catch {
+        /* probe failed — fall through, the optimistic clear still applies */
+      }
+      store.setNeedsApproval(false)
+
       toast.update(toastId, {
         variant: 'success',
         title: `${store.inputToken.symbol} approved`,
