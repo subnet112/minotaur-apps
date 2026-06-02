@@ -76,6 +76,25 @@ var manifest = {
           description: "ERC-2612 permit signature s",
           source: "system",
         },
+        platform_fee_wei: {
+          type: "uint256",
+          description: "Protocol fee in wrapped-native wei (validator-computed)",
+          source: "quote",
+          quote_field: "platform_fee_wei",
+        },
+        quoted_output: {
+          type: "uint256",
+          description:
+            "Net output we quoted the user; the CoW-style app-fee reference (validator-set, signed in; the app charges a share of execution ABOVE this)",
+          source: "quote",
+          quote_field: "estimated_output",
+        },
+        unwrap_output: {
+          type: "bool",
+          description:
+            "Deliver native ETH/TAO instead of the wrapped token (derived by the encoder when output == wrapped native)",
+          source: "system",
+        },
       },
       example_params: {
         input_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
@@ -87,6 +106,9 @@ var manifest = {
         permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
         permit_s: "0x0000000000000000000000000000000000000000000000000000000000000000",
+        platform_fee_wei: "0",
+        quoted_output: "1850000000",
+        unwrap_output: false,
       },
       scoring_hints: {
         goal: "Maximize output tokens received relative to minAmountOut",

@@ -12,14 +12,23 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 ///         validators verify via simulation, and the app handles token
 ///         management, positive slippage fee capture, and delivery.
 ///
-///         Intent params encoding (11 fields for swap):
+///         Intent params encoding (12 fields for swap):
 ///           abi.encode(address tokenIn, address tokenOut,
 ///                      uint256 amountIn, uint256 minAmountOut, address receiver,
 ///                      uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS,
 ///                      uint256 platformFeeWei,
+///                      uint256 quotedOutput,
 ///                      bool unwrapOutput)
 ///         platformFeeWei is consumed by AppIntentBase via `_calculateProtocolFee`
-///         (overridden below to read field 10, since `unwrapOutput` follows).
+///         (overridden below to read the 3rd-from-last slot, since quotedOutput
+///         and unwrapOutput follow it). `quotedOutput` is the off-chain quoted
+///         net output we showed the user (validator-set, signed in); the app fee
+///         is a share of execution ABOVE it (CoW-style), not above minAmountOut.
+///
+///         Native wrap/unwrap (Ethereum + Base, chain-agnostic via
+///         `wrappedNativeToken`): native-ETH input is wrapped to WETH by
+///         AppIntentBase._fundAndExecute (msg.value → deposit); native-ETH
+///         output is delivered by unwrapping WETH here when unwrapOutput is set.
 ///
 ///         Execution flow (via _handleIntent → _swap dispatch):
 ///           1. Decode params, handle optional ERC-2612 permit.
@@ -53,10 +62,23 @@ contract DexAggregatorApp is AppIntentBase {
 
     // ── State ──────────────────────────────────────────────────────────────
 
-    /// @notice Fee on positive slippage in BPS (e.g., 5000 = 50%)
+    /// @notice Share of price improvement over the quoted output, in BPS
+    ///         (e.g., 5000 = 50%). Applied to (gained - quotedOutput), the
+    ///         CoW-style "improvement over the quote we showed you" — NOT to
+    ///         the slippage band above minAmountOut.
     uint256 public feeBps;
 
-    /// @notice Address that receives positive slippage fees (in tokenOut)
+    /// @notice Hard cap on the app fee as BPS of realised output volume.
+    ///         CoW uses 0.98% (98 bps). Bounds the worst case regardless of the
+    ///         quotedOutput reference, so a mispriced/adversarial quotedOutput
+    ///         can never let the fee exceed this share of the trade. Tunable
+    ///         via setVolumeCapBps without a redeploy.
+    uint256 public volumeCapBps;
+
+    /// @notice Default volume cap (0.98%) set at construction.
+    uint256 public constant DEFAULT_VOLUME_CAP_BPS = 98;
+
+    /// @notice Address that receives the app fee (in tokenOut)
     address public feeCollector;
 
     // ── Events ─────────────────────────────────────────────────────────────
@@ -73,6 +95,7 @@ contract DexAggregatorApp is AppIntentBase {
 
     event FeeCollectorUpdated(address indexed newCollector);
     event FeeBpsUpdated(uint256 newFeeBps);
+    event VolumeCapBpsUpdated(uint256 newVolumeCapBps);
 
     // ── Constructor ────────────────────────────────────────────────────────
 
@@ -111,6 +134,7 @@ contract DexAggregatorApp is AppIntentBase {
         require(_feeBps <= 10000, "Fee too high");
         feeCollector = _feeCollector;
         feeBps = _feeBps;
+        volumeCapBps = DEFAULT_VOLUME_CAP_BPS;
         registeredIntents[SWAP_SELECTOR] = true;
         registeredIntents[BRIDGE_SELECTOR] = true;
     }
@@ -129,22 +153,29 @@ contract DexAggregatorApp is AppIntentBase {
         emit FeeBpsUpdated(_feeBps);
     }
 
+    function setVolumeCapBps(uint256 _volumeCapBps) external onlyRelayer {
+        require(_volumeCapBps <= 10000, "Cap too high");
+        volumeCapBps = _volumeCapBps;
+        emit VolumeCapBpsUpdated(_volumeCapBps);
+    }
+
     // ── Fee calculation override ──────────────────────────────────────────
 
     /// @notice Read platformFeeWei from intentParams.
-    /// @dev SWAP intent params has 11 fields; the fee is at index 9 with
-    ///      `unwrapOutput` (bool) as the trailing field. The base contract's
-    ///      default decoder reads the LAST 32 bytes and would return the bool
-    ///      cast to uint, so we override to read the penultimate slot.
-    ///      BRIDGE intent params has 5 fields with platformFeeWei trailing,
-    ///      so we delegate to the base helper for that case.
+    /// @dev SWAP intent params has 12 fields; the fee is the 3rd-from-last,
+    ///      with `quotedOutput` (uint256) then `unwrapOutput` (bool) trailing.
+    ///      All swap fields are static (32-byte words), so we read the word at
+    ///      [len-96 : len-64]. The base contract's default decoder reads the
+    ///      LAST 32 bytes (the bool) and would be wrong here, hence the
+    ///      override. BRIDGE intent params has 5 fields with platformFeeWei
+    ///      trailing, so we delegate to the base helper for that case.
     function _calculateProtocolFee(
         IntentOrder calldata order
     ) internal view override returns (uint256) {
         if (order.intentSelector == SWAP_SELECTOR) {
             bytes calldata p = order.intentParams;
-            if (p.length < 64) return 0;
-            return abi.decode(p[p.length - 64:p.length - 32], (uint256));
+            if (p.length < 96) return 0;
+            return abi.decode(p[p.length - 96:p.length - 64], (uint256));
         }
         return _decodePlatformFee(order.intentParams);
     }
@@ -177,8 +208,9 @@ contract DexAggregatorApp is AppIntentBase {
             address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, address receiver,
             uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS,
             uint256 platformFeeRaw,
+            uint256 quotedOutput,
             bool unwrapOutput
-        ) = abi.decode(order.intentParams, (address, address, uint256, uint256, address, uint256, uint8, bytes32, bytes32, uint256, bool));
+        ) = abi.decode(order.intentParams, (address, address, uint256, uint256, address, uint256, uint8, bytes32, bytes32, uint256, uint256, bool));
 
         require(tokenIn != tokenOut, "Same token");
 
@@ -218,14 +250,32 @@ contract DexAggregatorApp is AppIntentBase {
             }
         }
 
-        // 4. Positive-slippage capture (app revenue, in tokenOut).
-        uint256 fee = ((gained - minAmountOut) * feeBps) / 10000;
+        // 4. Capture price improvement over the quoted output (app revenue,
+        //    in tokenOut). CoW-style: the fee is a share of execution ABOVE the
+        //    off-chain quote we showed the user (`quotedOutput`, validator-set
+        //    and signed into the order), NOT a share of the slippage band above
+        //    `minAmountOut`. So in expectation (execution ≈ quote) the fee is
+        //    ~0 and the quote stays honest; only genuine improvement is taxed.
+        //    Three clamps, applied in order:
+        //      a) feeBps share of (gained - quotedOutput)
+        //      b) volumeCapBps of gained                 — hard volume cap
+        //      c) gained - minAmountOut                  — never deliver the
+        //         user below the minimum they signed
+        //    quotedOutput == 0 means "no reference supplied" ⇒ no app fee.
+        uint256 fee = 0;
+        if (quotedOutput > 0 && gained > quotedOutput) {
+            fee = ((gained - quotedOutput) * feeBps) / 10000;
+            uint256 cap = (gained * volumeCapBps) / 10000;
+            if (fee > cap) fee = cap;
+            uint256 surplusOverMin = gained - minAmountOut; // gained >= minAmountOut (checked above)
+            if (fee > surplusOverMin) fee = surplusOverMin;
+        }
         uint256 userAmount = gained - fee;
 
         // Auto-unwrap: if user selected native ETH/TAO as output (not WETH),
         // the frontend sets unwrapOutput=true. We unwrap WETH → native ETH
         // and send it directly so the user doesn't have to deal with WETH.
-        // The slippage fee stays in WETH at the app's feeCollector — they
+        // The app fee stays in WETH at the app's feeCollector — they
         // can unwrap themselves if desired.
         if (unwrapOutput && tokenOut == address(wrappedNativeToken) && userAmount > 0) {
             IWETH(address(wrappedNativeToken)).withdraw(userAmount);
