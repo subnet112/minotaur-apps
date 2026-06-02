@@ -142,6 +142,30 @@ export default function SwapForm(props: SwapFormProps) {
     <form className="sw-form sw-card" onSubmit={(e) => e.preventDefault()}>
       <BracketCorners />
 
+      {/* Beta tag + alpha-risk acknowledgement. Visual matches the design
+          system's sw-beta aside (section 00.31 in the component catalogue);
+          the embedded checkbox is our addition so Approve / Swap / Sign are
+          force-disabled until the user opts in. Acknowledgement persists
+          in localStorage via the store. */}
+      <aside className="sw-beta" role="note">
+        <span className="sw-beta-tag">
+          <span className="dot" aria-hidden="true" />
+          <span className="v">Beta</span>
+        </span>
+        <label className="sw-beta-msg">
+          <input
+            type="checkbox"
+            checked={!!props.acknowledged}
+            onChange={(e) => props.onAcknowledgedChange?.(e.target.checked)}
+            aria-label="Acknowledge alpha risk"
+          />
+          <span>
+            <span className="b">DEX Aggregator App currently in BETA</span>{' '}
+            <span className="ref">— swap at your own risk and keep amounts small until the app is stable. I accept these risks.</span>
+          </span>
+        </label>
+      </aside>
+
       <div className="sw-form-head">
         {/* Single settings entrypoint — slippage label + cog merged into one
             clickable pill. Used to be two buttons (slip pill + standalone cog)
@@ -378,38 +402,9 @@ export default function SwapForm(props: SwapFormProps) {
           </div>
         )}
 
-        {/* Alpha / no-liability disclaimer — must be acknowledged before any
-            funds-moving action (Approve / Swap / Sign) can fire. */}
-        <label
-          className="sw-disclaimer"
-          style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'flex-start',
-            margin: '4px 0 12px',
-            fontSize: 11,
-            lineHeight: 1.5,
-            letterSpacing: '0.01em',
-            color: 'var(--stone, #9a9a92)',
-            cursor: 'pointer',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={!!props.acknowledged}
-            onChange={(e) => props.onAcknowledgedChange?.(e.target.checked)}
-            style={{ marginTop: 2, flex: '0 0 auto', cursor: 'pointer', accentColor: 'var(--cretan, #dc5b1d)' }}
-            aria-label="Acknowledge alpha risk"
-          />
-          <span>
-            <strong style={{ color: 'var(--cretan, #dc5b1d)' }}>Alpha software.</strong>{' '}
-            Swaps execute on-chain and are irreversible. I understand this is alpha
-            and accept that Minotaur is not responsible for any loss of funds.
-          </span>
-        </label>
-
         {/* Action button (state machine — see 00.27). Blocked on the
-            acknowledgement above for the funds-moving states. */}
+            sw-beta acknowledgement at the top of the form for the
+            funds-moving states. */}
         <ActionButton
           state={props.actionState}
           onClick={props.onActionClick}
