@@ -76,11 +76,16 @@ var manifest = {
           description: "ERC-2612 permit signature s",
           source: "system",
         },
+        // NOTE: the three params below are appended to intentParams but are
+        // NOT part of the on-chain `swap(address,address,uint256,uint256,address)`
+        // signature, so they set in_signature:false — otherwise they'd change
+        // the computed intent selector and dispatch would revert "Unknown intent".
         platform_fee_wei: {
           type: "uint256",
           description: "Protocol fee in wrapped-native wei (validator-computed)",
           source: "quote",
           quote_field: "platform_fee_wei",
+          in_signature: false,
         },
         quoted_output: {
           type: "uint256",
@@ -88,12 +93,14 @@ var manifest = {
             "Net output we quoted the user; the CoW-style app-fee reference (validator-set, signed in; the app charges a share of execution ABOVE this)",
           source: "quote",
           quote_field: "estimated_output",
+          in_signature: false,
         },
         unwrap_output: {
           type: "bool",
           description:
             "Deliver native ETH/TAO instead of the wrapped token (derived by the encoder when output == wrapped native)",
           source: "system",
+          in_signature: false,
         },
       },
       example_params: {
