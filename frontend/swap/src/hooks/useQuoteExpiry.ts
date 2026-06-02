@@ -16,8 +16,11 @@ export function useQuoteExpiry(requestQuote: () => void) {
       store.setQuoteExpiry(null)
       return
     }
-    const validFor = store.quote.valid_for_seconds
-    const startTime = Date.now()
+    // Guard against malformed responses: never let validFor fall below 5 s,
+    // otherwise the loop below would refetch every tick.
+    const validFor = Math.max(5, store.quote.valid_for_seconds || 0)
+    let startTime = Date.now()
+    let lastTriggerAt = 0
 
     const updateExpiry = () => {
       // Read live store state so we don't act on a stale closure value.
@@ -29,8 +32,18 @@ export function useQuoteExpiry(requestQuote: () => void) {
       const elapsed = Math.floor((Date.now() - startTime) / 1000)
       const remaining = Math.max(0, validFor - elapsed)
       setQuoteExpiry(remaining)
-      // Don't re-quote while submitting or processing an active order
       if (remaining === 0 && !submitting && !activeOrder) {
+        // Rate-limit the refetch trigger to at most once per validFor window.
+        // Without this, a requestQuote() that fails or returns without
+        // updating store.quote (e.g. 429 from the validator's quote
+        // rate limit) leaves remaining at 0, and the 1 s interval ends
+        // up calling requestQuote() every tick — which only generates
+        // more 429s. Resetting startTime and recording lastTriggerAt
+        // bounds retries to one per validFor period.
+        const now = Date.now()
+        if (now - lastTriggerAt < validFor * 1000) return
+        lastTriggerAt = now
+        startTime = now
         requestQuote()
       }
     }
