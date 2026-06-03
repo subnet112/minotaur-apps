@@ -144,8 +144,21 @@ interface DropdownProps {
 }
 
 function Dropdown({ address, chainName, recentSwaps, onCopy, onSwitchChain, onSwitchWallet, onDisconnect }: DropdownProps) {
+  // Belt-and-suspenders: stop click events from bubbling past the menu
+  // boundary. The document-level outside-click handler in AppWalletButton
+  // is already keyed off 'click' (so items fire first), but if anything
+  // ever re-introduces a 'mousedown'/'pointerdown' listener at the
+  // document level, stopping propagation here guarantees clicks inside
+  // the menu never look like outside-clicks.
+  const swallow = (e: React.MouseEvent | React.PointerEvent) => e.stopPropagation()
   return (
-    <div className="app-wallet-menu is-floating" role="menu">
+    <div
+      className="app-wallet-menu is-floating"
+      role="menu"
+      onClick={swallow}
+      onMouseDown={swallow}
+      onPointerDown={swallow}
+    >
       <span className="ct tl" aria-hidden="true" />
       <span className="ct tr" aria-hidden="true" />
       <span className="ct bl" aria-hidden="true" />
