@@ -1600,3 +1600,95 @@
   color: var(--bone);
   font-weight: 500;
 }
+
+/* =========================================================================
+   wm-* — "Recent swaps" mini-feed embedded inside .app-wallet-menu
+   (design 00.19 VAR 03)
+   ========================================================================= */
+.wm-recent {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 6px 6px;
+  border-top: 1px solid var(--hairline);
+}
+.wm-recent-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 8px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+.wm-recent-head .glyph {
+  width: 5px;
+  height: 5px;
+  background: var(--mist);
+  display: inline-block;
+}
+.wm-recent-head .ct-count {
+  margin-left: auto;
+  color: var(--stone);
+}
+.wm-swap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  text-decoration: none;
+  color: var(--bone);
+  font-family: var(--mono);
+  font-size: 11px;
+  border-radius: 2px;
+  transition: background 120ms ease;
+}
+.wm-swap:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.wm-swap-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wm-swap-pair b {
+  font-weight: 500;
+  color: var(--bone-pure);
+}
+.wm-swap-pair .s {
+  color: var(--stone);
+}
+.wm-swap-pair .arr {
+  color: var(--mist);
+  padding: 0 2px;
+}
+.wm-swap-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.wm-swap-status .d {
+  width: 6px;
+  height: 6px;
+  display: inline-block;
+  border-radius: 50%;
+}
+.wm-swap-status.is-confirmed .d { background: var(--lime); }
+.wm-swap-status.is-pending   .d { background: var(--mist); }
+.wm-swap-status.is-failed    .d { background: var(--cretan); }
+.wm-swap-ts {
+  color: var(--stone);
+  font-size: 10px;
+}
+.wm-view-all {
+  text-decoration: none;
+  border-top: 1px solid var(--hairline);
+}
