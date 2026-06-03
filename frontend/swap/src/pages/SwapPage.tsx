@@ -135,7 +135,6 @@ export default function SwapPage() {
   const quoteExpiry = useSwapStore((s) => s.quoteExpiry)
   const activeOrder = useSwapStore((s) => s.activeOrder)
   const executionDetails = useSwapStore((s) => s.executionDetails)
-  const showHistory = useSwapStore((s) => s.showHistory)
   const showDebug = useSwapStore((s) => s.showDebug)
   const tokenSelectorOpen = useSwapStore((s) => s.tokenSelectorOpen)
   const showSettings = useSwapStore((s) => s.showSettings)
@@ -146,7 +145,6 @@ export default function SwapPage() {
   const setOutputToken = useSwapStore((s) => s.setOutputToken)
   const setTokenSelectorOpen = useSwapStore((s) => s.setTokenSelectorOpen)
   const setShowSettings = useSwapStore((s) => s.setShowSettings)
-  const setShowHistory = useSwapStore((s) => s.setShowHistory)
   const setShowDebug = useSwapStore((s) => s.setShowDebug)
   const setWalletConnected = useSwapStore((s) => s.setWalletConnected)
   const swapTokens = useSwapStore((s) => s.swapTokens)
@@ -279,20 +277,16 @@ export default function SwapPage() {
             // Defaults to false on SwapForm; explicit here for grep-ability.
             crossChainEnabled={false}
             headerRight={
-              <>
+              // Recent-swaps history lives in the wallet dropdown now
+              // (AppWalletButton → .wm-recent). The dev-only debug toggle
+              // stays for local testing.
+              import.meta.env.DEV ? (
                 <HeaderIconButton
-                  role="history"
-                  active={showHistory}
-                  onClick={() => setShowHistory(!showHistory)}
+                  role="debug"
+                  active={showDebug}
+                  onClick={() => setShowDebug(!showDebug)}
                 />
-                {import.meta.env.DEV && (
-                  <HeaderIconButton
-                    role="debug"
-                    active={showDebug}
-                    onClick={() => setShowDebug(!showDebug)}
-                  />
-                )}
-              </>
+              ) : undefined
             }
             fromToken={fromTokenDisplay}
             toToken={toTokenDisplay_}
@@ -391,13 +385,8 @@ export default function SwapPage() {
             />
           )}
 
-          {showHistory && (
-            <RevealPanel
-              role="history"
-              wallet={designWallet}
-              onClose={() => setShowHistory(false)}
-            />
-          )}
+          {/* History panel removed — Recent swaps now lives in the
+              wallet-button dropdown (AppWalletButton → .wm-recent). */}
 
           {import.meta.env.DEV && showDebug && (
             <RevealPanel
