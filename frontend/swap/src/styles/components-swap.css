@@ -1582,3 +1582,21 @@
 .sw-beta-msg .ref {
   color: var(--stone);
 }
+
+/* =========================================================================
+   sw-action-help — small help line directly beneath the swap action button
+   (used for the approve / approving copy that used to live in
+   WalletModeBlock(variant='approval'))
+   ========================================================================= */
+.sw-action-help {
+  margin: 10px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: center;
+  color: var(--mist);
+}
+.sw-action-help .b {
+  color: var(--bone);
+  font-weight: 500;
+}

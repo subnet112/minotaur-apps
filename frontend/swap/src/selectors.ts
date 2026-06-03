@@ -61,11 +61,11 @@ export function selectActionState(s: SelectableState): ActionState {
   if (!s.quote) return 'no-route'
 
   if (s.approving) return 'approving'
-  // Approval CTA lives in WalletModeBlock (variant='approval'). The action
-  // button stays disabled and non-spinning while we wait for the user to
-  // trigger the approval there. `awaiting-sig` matches that semantic
-  // ("Awaiting approval", disabled, no glyph).
-  if (s.needsApproval) return 'awaiting-sig'
+  // Approval CTA now lives on the swap button itself — when an ERC-20
+  // allowance is needed, the button transitions to 'approve' (lime,
+  // clickable, label "Approve <token>"); the SwapForm renders a short
+  // help line directly beneath it. WalletModeBlock no longer owns this.
+  if (s.needsApproval) return 'approve'
 
   if (s.submitting) return 'submitting'
   if (s.activeOrder && !TERMINAL_ORDER_STATUSES.has(s.activeOrder.status)) {
@@ -77,10 +77,10 @@ export function selectActionState(s: SelectableState): ActionState {
 
 export function selectModeBlockVariant(s: SelectableState): ModeBlock | null {
   // 'create-wallet' / 'fund-wallet' variants retired with the managed-wallet
-  // flow removal. External (RainbowKit) handles its own connect UX; bittensor
-  // wallet still needs the substrate proxy banner.
-  if (s.walletMode === 'external' && s.needsApproval && !s.approving) return 'approval'
-  if (s.approving) return 'approving'
+  // flow removal. 'approval' + 'approving' moved onto the swap button itself
+  // (see selectActionState → 'approve' / 'approving'); WalletModeBlock no
+  // longer fires for those — keeping just the contextual notices that don't
+  // map naturally to a button state (native ETH broadcast, bittensor proxy).
   if (s.inputToken?.native) return 'native-eth'
   if (s.walletMode === 'bittensor' && !s.bittensorProxySetup) return 'setup-proxy'
   return null
