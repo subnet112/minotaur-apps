@@ -12,7 +12,7 @@
  *   - Dropdown: account header, Copy address / Switch chain / Switch
  *     wallet, Recent swaps mini-feed, View all orders, Disconnect.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useDisconnect } from 'wagmi'
 import { useToast } from '@/components/shell'
@@ -42,36 +42,20 @@ function statusBadge(status: string): 'confirmed' | 'pending' | 'failed' {
 
 export default function AppWalletButton() {
   const [menuOpen, setMenuOpen] = useState(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
   const { disconnect } = useDisconnect()
   const recentSwaps = useSwapStore((s) => s.recentSwaps)
 
-  // Outside-click + Escape close.
-  //
-  // We listen for 'click' (not 'mousedown') so that an item's own onClick
-  // handler runs BEFORE this one — otherwise mousedown would set
-  // menuOpen=false, React would unmount the menu before the click event
-  // reached the item, and the action would be lost. With 'click', the
-  // item's handler fires first (item is still mounted), the action does
-  // its thing, then the document-level click bubbles up to here — and
-  // because the target is inside wrapRef, we leave menuOpen alone (the
-  // item's handler already closed it via setMenuOpen(false) where it
-  // wanted to).
+  // Keyboard Escape close. The outside-click close is implemented via the
+  // backdrop div below instead of a document-level listener — the backdrop
+  // sits behind the menu visually (lower z-index) and absorbs any click
+  // outside the menu, which dodges all the event-ordering / stopPropagation
+  // edge cases a document listener has to fight.
   useEffect(() => {
     if (!menuOpen) return
-    const onDocClick = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
-      }
-    }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
-    document.addEventListener('click', onDocClick)
     document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('click', onDocClick)
-      document.removeEventListener('keydown', onKey)
-    }
+    return () => document.removeEventListener('keydown', onKey)
   }, [menuOpen])
 
   return (
@@ -80,7 +64,7 @@ export default function AppWalletButton() {
         const ready = mounted && authenticationStatus !== 'loading'
         const connected = ready && !!account && !!chain
         return (
-          <div ref={wrapRef} style={{ position: 'relative' }}>
+          <div style={{ position: 'relative' }}>
             {!connected ? (
               <button
                 className="app-wallet"
@@ -109,21 +93,32 @@ export default function AppWalletButton() {
             )}
 
             {menuOpen && connected && (
-              <Dropdown
-                address={account.address}
-                chainName={chain.name || 'Base'}
-                recentSwaps={recentSwaps}
-                onClose={() => setMenuOpen(false)}
-                onCopy={() => {
-                  navigator.clipboard.writeText(account.address)
-                    .then(() => toast.transient({ title: 'Address copied' }))
-                    .catch(() => toast.error({ title: 'Copy failed' }))
-                  setMenuOpen(false)
-                }}
-                onSwitchChain={() => { openChainModal(); setMenuOpen(false) }}
-                onSwitchWallet={() => { openConnectModal(); setMenuOpen(false) }}
-                onDisconnect={() => { disconnect(); setMenuOpen(false) }}
-              />
+              <>
+                {/* Backdrop — full-viewport invisible div behind the
+                    dropdown. Clicks on it close the menu; clicks on the
+                    dropdown (higher z-index) hit the dropdown's React
+                    handlers directly and never reach the backdrop. */}
+                <div
+                  onClick={() => setMenuOpen(false)}
+                  style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'transparent' }}
+                  aria-hidden="true"
+                />
+                <Dropdown
+                  address={account.address}
+                  chainName={chain.name || 'Base'}
+                  recentSwaps={recentSwaps}
+                  onClose={() => setMenuOpen(false)}
+                  onCopy={() => {
+                    navigator.clipboard.writeText(account.address)
+                      .then(() => toast.transient({ title: 'Address copied' }))
+                      .catch(() => toast.error({ title: 'Copy failed' }))
+                    setMenuOpen(false)
+                  }}
+                  onSwitchChain={() => { openChainModal(); setMenuOpen(false) }}
+                  onSwitchWallet={() => { openConnectModal(); setMenuOpen(false) }}
+                  onDisconnect={() => { disconnect(); setMenuOpen(false) }}
+                />
+              </>
             )}
           </div>
         )
@@ -144,21 +139,8 @@ interface DropdownProps {
 }
 
 function Dropdown({ address, chainName, recentSwaps, onCopy, onSwitchChain, onSwitchWallet, onDisconnect }: DropdownProps) {
-  // Belt-and-suspenders: stop click events from bubbling past the menu
-  // boundary. The document-level outside-click handler in AppWalletButton
-  // is already keyed off 'click' (so items fire first), but if anything
-  // ever re-introduces a 'mousedown'/'pointerdown' listener at the
-  // document level, stopping propagation here guarantees clicks inside
-  // the menu never look like outside-clicks.
-  const swallow = (e: React.MouseEvent | React.PointerEvent) => e.stopPropagation()
   return (
-    <div
-      className="app-wallet-menu is-floating"
-      role="menu"
-      onClick={swallow}
-      onMouseDown={swallow}
-      onPointerDown={swallow}
-    >
+    <div className="app-wallet-menu is-floating" role="menu">
       <span className="ct tl" aria-hidden="true" />
       <span className="ct tr" aria-hidden="true" />
       <span className="ct bl" aria-hidden="true" />
