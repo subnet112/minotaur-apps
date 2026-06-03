@@ -21,6 +21,10 @@ interface ActionButtonProps {
   /** Force the button disabled regardless of state — used to block
    *  funds-moving actions until the alpha disclaimer is acknowledged. */
   forceDisabled?: boolean
+  /** Substituted into labels that mention the input token (approve /
+   *  approving / insufficient). Falls back to "USDC" if unset, matching
+   *  the original hardcoded copy. */
+  tokenSymbol?: string
 }
 
 interface StateConfig {
@@ -37,10 +41,11 @@ const STATE_CONFIG: Record<ActionState, StateConfig> = {
   disconnected:     { modifier: 'is-disconnected', label: 'Connect wallet',     disabled: false, glyph: 'none' },
   'wrong-network':  { modifier: 'is-wrong-net',    label: 'Switch to Ethereum', disabled: false, glyph: 'none' },
   empty:            { modifier: 'is-empty',        label: 'Enter amount',       disabled: true,  glyph: 'none' },
-  insufficient:     { modifier: 'is-insufficient', label: 'Insufficient USDC',  disabled: true,  glyph: 'none' },
-  fetching:         { modifier: 'is-fetching',     label: 'Fetching quote…',    disabled: true,  glyph: 'spinner' },
-  'no-route':       { modifier: 'is-no-route',     label: 'No route found',     disabled: true,  glyph: 'none' },
-  approving:        { modifier: 'is-approving',    label: 'Approving USDC…',    disabled: true,  glyph: 'spinner' },
+  insufficient:     { modifier: 'is-insufficient', label: 'Insufficient {token}', disabled: true,  glyph: 'none' },
+  fetching:         { modifier: 'is-fetching',     label: 'Fetching quote…',     disabled: true,  glyph: 'spinner' },
+  'no-route':       { modifier: 'is-no-route',     label: 'No route found',      disabled: true,  glyph: 'none' },
+  approve:          { modifier: '',                label: 'Approve {token}',     disabled: false, glyph: 'arrow' },
+  approving:        { modifier: 'is-approving',    label: 'Approving {token}…',  disabled: true,  glyph: 'spinner' },
   'swap-ready':     { modifier: '',                label: 'Swap',               disabled: false, glyph: 'arrow' },
   'sign-broadcast': { modifier: '',                label: 'Sign & broadcast',   disabled: false, glyph: 'arrow' },
   submitting:       { modifier: 'is-submitting',   label: 'Submitting…',        disabled: true,  glyph: 'spinner' },
@@ -48,8 +53,9 @@ const STATE_CONFIG: Record<ActionState, StateConfig> = {
   'enter-recipient':{ modifier: 'is-empty',        label: 'Enter recipient',    disabled: true,  glyph: 'none' },
 }
 
-export default function ActionButton({ state, onClick, forceDisabled = false }: ActionButtonProps) {
+export default function ActionButton({ state, onClick, forceDisabled = false, tokenSymbol }: ActionButtonProps) {
   const cfg = STATE_CONFIG[state]
+  const label = cfg.label.replace('{token}', tokenSymbol || 'USDC')
   return (
     <button
       className={`sw-cta ${cfg.modifier}`.trim()}
@@ -58,7 +64,7 @@ export default function ActionButton({ state, onClick, forceDisabled = false }: 
       onClick={onClick}
     >
       {cfg.glyph === 'spinner' && <span className="spinner" aria-hidden="true" />}
-      <span>{cfg.label}</span>
+      <span>{label}</span>
       {cfg.glyph === 'arrow' && (
         <span className="arr" aria-hidden="true">
           {' '}

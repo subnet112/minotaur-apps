@@ -231,6 +231,13 @@ export default function SwapPage() {
       // User needs to switch chain in their wallet — nothing to do here
       return
     }
+    if (actionState === 'approve') {
+      // ERC-20 allowance flow — folded into the swap button instead of a
+      // separate WalletModeBlock CTA. useApproval handles the writeContract
+      // + waitForTransactionReceipt + optimistic needsApproval clear.
+      approve()
+      return
+    }
     if (actionState === 'swap-ready' || actionState === 'sign-broadcast') {
       submitSwap()
     }
@@ -255,11 +262,11 @@ export default function SwapPage() {
         <div className="dex-content">
           {modeBlockVariant && (
             <div className="sw-stack">
-              <WalletModeBlock
-                variant={modeBlockVariant}
-                onCtaClick={modeBlockVariant === 'approval' && accepted ? approve : undefined}
-                disabled={modeBlockVariant === 'approval' && !accepted}
-              />
+              {/* WalletModeBlock no longer owns the approval CTA — that lives on
+                  the swap button itself now (selectActionState → 'approve'). The
+                  remaining variants ('native-eth', 'setup-proxy') are passive
+                  notices without click targets, so no onCtaClick wiring needed. */}
+              <WalletModeBlock variant={modeBlockVariant} />
             </div>
           )}
 

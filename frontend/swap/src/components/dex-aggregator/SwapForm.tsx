@@ -404,15 +404,41 @@ export default function SwapForm(props: SwapFormProps) {
 
         {/* Action button (state machine — see 00.27). Blocked on the
             sw-beta acknowledgement at the top of the form for the
-            funds-moving states. */}
+            funds-moving states (Approve / Swap / Sign). */}
         <ActionButton
           state={props.actionState}
           onClick={props.onActionClick}
+          tokenSymbol={props.fromToken?.symbol}
           forceDisabled={
-            !props.acknowledged &&
-            (props.actionState === 'swap-ready' || props.actionState === 'sign-broadcast')
+            !props.acknowledged && (
+              props.actionState === 'approve' ||
+              props.actionState === 'swap-ready' ||
+              props.actionState === 'sign-broadcast'
+            )
           }
         />
+
+        {/* Approval help text — design 00.26's approval body, now beneath
+            the action button instead of in a contextual notice above the
+            form. Renders only while the button is in the approve / approving
+            state so it doesn't add chrome to ordinary swaps. */}
+        {(props.actionState === 'approve' || props.actionState === 'approving') && (
+          <p className="sw-action-help">
+            {props.actionState === 'approving' ? (
+              <>
+                Approval submitted — waiting for the transaction to confirm. Cancel from
+                your wallet to release the slot.
+              </>
+            ) : (
+              <>
+                One-time approval for{' '}
+                <span className="b">{props.fromToken?.symbol || 'this token'}</span>. Enable{' '}
+                <span className="b">Unlimited Approval</span> in settings to skip this on
+                future swaps.
+              </>
+            )}
+          </p>
+        )}
       </div>
     </form>
   )
