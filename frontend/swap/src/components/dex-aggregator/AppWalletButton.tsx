@@ -133,7 +133,7 @@ interface DropdownProps {
 
 function Dropdown({ address, chainName, recentSwaps, onCopy, onSwitchChain, onSwitchWallet, onDisconnect }: DropdownProps) {
   return (
-    <div className="app-wallet-menu" role="menu">
+    <div className="app-wallet-menu is-floating" role="menu">
       <span className="ct tl" aria-hidden="true" />
       <span className="ct tr" aria-hidden="true" />
       <span className="ct bl" aria-hidden="true" />
