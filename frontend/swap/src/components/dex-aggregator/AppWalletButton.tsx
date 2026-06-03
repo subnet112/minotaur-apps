@@ -48,16 +48,28 @@ export default function AppWalletButton() {
   const recentSwaps = useSwapStore((s) => s.recentSwaps)
 
   // Outside-click + Escape close.
+  //
+  // We listen for 'click' (not 'mousedown') so that an item's own onClick
+  // handler runs BEFORE this one — otherwise mousedown would set
+  // menuOpen=false, React would unmount the menu before the click event
+  // reached the item, and the action would be lost. With 'click', the
+  // item's handler fires first (item is still mounted), the action does
+  // its thing, then the document-level click bubbles up to here — and
+  // because the target is inside wrapRef, we leave menuOpen alone (the
+  // item's handler already closed it via setMenuOpen(false) where it
+  // wanted to).
   useEffect(() => {
     if (!menuOpen) return
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setMenuOpen(false)
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
     }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
-    document.addEventListener('mousedown', onDown)
+    document.addEventListener('click', onDocClick)
     document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('click', onDocClick)
       document.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
