@@ -36,7 +36,7 @@ import { useComparisonQuotes } from '@/hooks/useComparisonQuotes'
 import { useApproval } from '@/hooks/useApproval'
 
 import AppPageHeader from '@/components/dex-aggregator/AppPageHeader'
-import { ConnectButton } from '@rainbow-me/rainbowkit'
+import AppWalletButton from '@/components/dex-aggregator/AppWalletButton'
 import HeaderIconButton from '@/components/dex-aggregator/HeaderIconButton'
 import SwapForm from '@/components/dex-aggregator/SwapForm'
 import TokenSelectorModal from '@/components/dex-aggregator/TokenSelectorModal'
@@ -247,14 +247,13 @@ export default function SwapPage() {
     <>
       <AppPageHeader
         actions={
-          // RainbowKit handles connect / account / chain. The history (and
-          // dev-only debug) toggles live on the swap form head instead — the
-          // page header is reserved for wallet/global identity.
-          <ConnectButton
-            showBalance={false}
-            chainStatus={{ smallScreen: 'icon', largeScreen: 'full' }}
-            accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }}
-          />
+          // Design-system wallet button (00.19). Uses RainbowKit's connect
+          // modal + chain modal under the hood but renders the connected
+          // state as a custom dropdown (account header, Copy / Switch
+          // chain / Switch wallet, Recent swaps, View all orders,
+          // Disconnect) instead of RainbowKit's default centred account
+          // modal. History panel toggle stays in the swap-form header.
+          <AppWalletButton />
         }
       />
 
