@@ -37,7 +37,12 @@ createRoot(document.getElementById('root')!).render(
             overlayBlur: 'small',
           })}
         >
-          <BrowserRouter>
+          {/* basename mirrors vite's BASE_URL so the router works both in
+              dev (served at /) and in the production build (served at
+              /swap/ by apps/app's iframe). Without this, /swap/orders
+              would fall through to the 404 route because the router
+              would try to match it as a fully-rooted path. */}
+          <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
             <ToastProvider>
               <App />
             </ToastProvider>
