@@ -22,6 +22,7 @@ import {
 } from './SwapPage.mappers'
 import type { Token, TokenDisplay } from '@/types'
 import { CHAIN_CONFIG } from '@/config/chains'
+import { classifyOrderStatus } from '@/lib/orderStatus'
 
 import { useAppBootstrap } from '@/hooks/useAppBootstrap'
 import { useDevPreviewState } from '@/hooks/useDevPreviewState'
@@ -43,6 +44,7 @@ import SwapForm from '@/components/dex-aggregator/SwapForm'
 import TokenSelectorModal from '@/components/dex-aggregator/TokenSelectorModal'
 import WalletModeBlock from '@/components/dex-aggregator/WalletModeBlock'
 import SwapReviewCard from '@/components/dex-aggregator/SwapReviewCard'
+import SwapSuccessCard from '@/components/dex-aggregator/SwapSuccessCard'
 import OrderStatusCard from '@/components/dex-aggregator/OrderStatusCard'
 import SettingsSheet from '@/components/dex-aggregator/SettingsSheet'
 import RevealPanel from '@/components/dex-aggregator/RevealPanel'
@@ -471,25 +473,46 @@ export default function SwapPage() {
             />
           )}
 
-          {flowStep === 'status' && activeOrder && (
-            <OrderStatusCard
-              step={activeOrder.status}
-              orderId={activeOrder.order_id}
-              txHash={activeOrder.tx_hash ?? undefined}
-              score={activeOrder.score ?? undefined}
-              output={executionDetails?.amountOut}
-              surplus={executionDetails?.surplus}
-              fee={executionDetails?.fee}
-              gas={executionDetails?.gasUsed}
-              errorMessage={(activeOrder as Record<string, unknown>).error as string | undefined}
-              explorerBaseUrl={CHAIN_CONFIG[chainId]?.explorer ?? ''}
-              onNewSwap={() => {
-                useSwapStore.getState().setActiveOrder(null)
-                useSwapStore.getState().setInputAmount('')
-                setFlowStep('form')
-              }}
-            />
-          )}
+          {flowStep === 'status' && activeOrder && (() => {
+            const { isFilled } = classifyOrderStatus(activeOrder.status)
+            const onNewSwap = () => {
+              useSwapStore.getState().setActiveOrder(null)
+              useSwapStore.getState().setInputAmount('')
+              setFlowStep('form')
+            }
+            // Filled → celebration card. Anything else (pending / open /
+            // failed / cancelled) → the stepper card so the user can see
+            // progress or the failure reason.
+            if (isFilled) {
+              return (
+                <SwapSuccessCard
+                  orderId={activeOrder.order_id}
+                  txHash={activeOrder.tx_hash ?? undefined}
+                  output={executionDetails?.amountOut}
+                  outputSymbol={outputToken?.symbol}
+                  surplus={executionDetails?.surplus}
+                  gas={executionDetails?.gasUsed}
+                  explorerBaseUrl={CHAIN_CONFIG[chainId]?.explorer ?? ''}
+                  onNewSwap={onNewSwap}
+                />
+              )
+            }
+            return (
+              <OrderStatusCard
+                step={activeOrder.status}
+                orderId={activeOrder.order_id}
+                txHash={activeOrder.tx_hash ?? undefined}
+                score={activeOrder.score ?? undefined}
+                output={executionDetails?.amountOut}
+                surplus={executionDetails?.surplus}
+                fee={executionDetails?.fee}
+                gas={executionDetails?.gasUsed}
+                errorMessage={(activeOrder as Record<string, unknown>).error as string | undefined}
+                explorerBaseUrl={CHAIN_CONFIG[chainId]?.explorer ?? ''}
+                onNewSwap={onNewSwap}
+              />
+            )
+          })()}
 
           {import.meta.env.DEV && showDebug && (
             <RevealPanel
