@@ -12,7 +12,8 @@
  *   - Dropdown: account header, Copy address / Switch chain / Switch
  *     wallet, Recent swaps mini-feed, View all orders, Disconnect.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useDisconnect } from 'wagmi'
 import { useToast } from '@/components/shell'
@@ -42,15 +43,29 @@ function statusBadge(status: string): 'confirmed' | 'pending' | 'failed' {
 
 export default function AppWalletButton() {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
   const toast = useToast()
   const { disconnect } = useDisconnect()
   const recentSwaps = useSwapStore((s) => s.recentSwaps)
 
-  // Keyboard Escape close. The outside-click close is implemented via the
-  // backdrop div below instead of a document-level listener — the backdrop
-  // sits behind the menu visually (lower z-index) and absorbs any click
-  // outside the menu, which dodges all the event-ordering / stopPropagation
-  // edge cases a document listener has to fight.
+  // Position the portal-rendered dropdown right under the button. Recomputed
+  // on open and whenever the window resizes — we use fixed positioning, so
+  // these coords are relative to the iframe viewport.
+  useLayoutEffect(() => {
+    if (!menuOpen) return
+    const recompute = () => {
+      const rect = btnRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const vw = window.innerWidth
+      setAnchor({ top: rect.bottom + 6, right: vw - rect.right })
+    }
+    recompute()
+    window.addEventListener('resize', recompute)
+    return () => window.removeEventListener('resize', recompute)
+  }, [menuOpen])
+
+  // Escape closes the menu.
   useEffect(() => {
     if (!menuOpen) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
@@ -64,9 +79,10 @@ export default function AppWalletButton() {
         const ready = mounted && authenticationStatus !== 'loading'
         const connected = ready && !!account && !!chain
         return (
-          <div style={{ position: 'relative' }}>
+          <>
             {!connected ? (
               <button
+                ref={btnRef}
                 className="app-wallet"
                 type="button"
                 onClick={openConnectModal}
@@ -77,6 +93,7 @@ export default function AppWalletButton() {
               </button>
             ) : (
               <button
+                ref={btnRef}
                 className="app-wallet is-connected is-metamask"
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
@@ -92,55 +109,75 @@ export default function AppWalletButton() {
               </button>
             )}
 
-            {menuOpen && connected && (
+            {menuOpen && connected && anchor && createPortal(
               <>
-                {/* Backdrop — full-viewport invisible div behind the
-                    dropdown. Clicks on it close the menu; clicks on the
-                    dropdown (higher z-index) hit the dropdown's React
-                    handlers directly and never reach the backdrop. */}
+                {/* Backdrop — full-viewport, sits at document.body level
+                    so no ancestor styling (transform/filter/contain on a
+                    parent) can break its hit target. */}
                 <div
                   onClick={() => setMenuOpen(false)}
-                  style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'transparent' }}
+                  style={{
+                    position: 'fixed',
+                    top: 0, right: 0, bottom: 0, left: 0,
+                    zIndex: 9998,
+                    background: 'transparent',
+                  }}
                   aria-hidden="true"
                 />
-                <Dropdown
-                  address={account.address}
-                  chainName={chain.name || 'Base'}
-                  recentSwaps={recentSwaps}
-                  onClose={() => setMenuOpen(false)}
-                  onCopy={() => {
-                    navigator.clipboard.writeText(account.address)
-                      .then(() => toast.transient({ title: 'Address copied' }))
-                      .catch(() => toast.error({ title: 'Copy failed' }))
-                    setMenuOpen(false)
+                {/* Dropdown — also portalled and fixed-positioned, so it
+                    can never be clipped by an ancestor and lives in a
+                    clean stacking context above everything else. */}
+                <div
+                  className="app-wallet-menu is-floating"
+                  role="menu"
+                  style={{
+                    position: 'fixed',
+                    top: anchor.top,
+                    right: anchor.right,
+                    zIndex: 9999,
                   }}
-                  onSwitchChain={() => { openChainModal(); setMenuOpen(false) }}
-                  onSwitchWallet={() => { openConnectModal(); setMenuOpen(false) }}
-                  onDisconnect={() => { disconnect(); setMenuOpen(false) }}
-                />
-              </>
+                >
+                  <DropdownBody
+                    address={account.address}
+                    chainName={chain.name || 'Base'}
+                    recentSwaps={recentSwaps}
+                    onCopy={() => {
+                      navigator.clipboard.writeText(account.address)
+                        .then(() => toast.transient({ title: 'Address copied' }))
+                        .catch(() => toast.error({ title: 'Copy failed' }))
+                      setMenuOpen(false)
+                    }}
+                    onSwitchChain={() => { openChainModal(); setMenuOpen(false) }}
+                    onSwitchWallet={() => { openConnectModal(); setMenuOpen(false) }}
+                    onDisconnect={() => { disconnect(); setMenuOpen(false) }}
+                  />
+                </div>
+              </>,
+              document.body,
             )}
-          </div>
+          </>
         )
       }}
     </ConnectButton.Custom>
   )
 }
 
-interface DropdownProps {
+interface DropdownBodyProps {
   address: string
   chainName: string
   recentSwaps: SwapHistoryItem[]
-  onClose: () => void
   onCopy: () => void
   onSwitchChain: () => void
   onSwitchWallet: () => void
   onDisconnect: () => void
 }
 
-function Dropdown({ address, chainName, recentSwaps, onCopy, onSwitchChain, onSwitchWallet, onDisconnect }: DropdownProps) {
+// Just the inner contents of the dropdown. The outer .app-wallet-menu
+// wrapper is rendered by AppWalletButton's portal so it can be portalled
+// directly into document.body with its own fixed positioning.
+function DropdownBody({ address, chainName, recentSwaps, onCopy, onSwitchChain, onSwitchWallet, onDisconnect }: DropdownBodyProps) {
   return (
-    <div className="app-wallet-menu is-floating" role="menu">
+    <>
       <span className="ct tl" aria-hidden="true" />
       <span className="ct tr" aria-hidden="true" />
       <span className="ct bl" aria-hidden="true" />
@@ -221,7 +258,7 @@ function Dropdown({ address, chainName, recentSwaps, onCopy, onSwitchChain, onSw
           <span>Disconnect</span>
         </button>
       </div>
-    </div>
+    </>
   )
 }
 
