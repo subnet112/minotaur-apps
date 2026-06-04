@@ -111,6 +111,11 @@ interface SwapFormProps {
    *  neither funds-moving action can fire without consent. */
   acknowledged?: boolean
   onAcknowledgedChange?: (v: boolean) => void
+
+  /** When true, briefly applies `.is-flash` to the disclaimer aside so users
+   *  who clicked the disabled action button see what they need to tick. The
+   *  page (SwapPage) drives the timing — this prop is only the visual hook. */
+  disclaimerFlash?: boolean
 }
 
 export default function SwapForm(props: SwapFormProps) {
@@ -147,7 +152,7 @@ export default function SwapForm(props: SwapFormProps) {
           the embedded checkbox is our addition so Approve / Swap / Sign are
           force-disabled until the user opts in. Acknowledgement persists
           in localStorage via the store. */}
-      <aside className="sw-beta" role="note">
+      <aside className={`sw-beta ${props.disclaimerFlash ? 'is-flash' : ''}`.trim()} role="note">
         <span className="sw-beta-tag">
           <span className="dot" aria-hidden="true" />
           <span className="v">Beta</span>

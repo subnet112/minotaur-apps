@@ -9,8 +9,9 @@
  *   - StateSwitcher is dropped (URL-state previewer is meaningless with
  *     real Zustand; useDevPreviewState handles URL-driven preview in dev)
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useSwapStore } from '@/store'
+import { useToast } from '@/components/shell'
 import { selectActionState, selectModeBlockVariant } from '@/selectors'
 import {
   mapStoreToSwapFormProps,
@@ -103,6 +104,23 @@ export default function SwapPage() {
   const externalQuotes = useComparisonQuotes()
   // ERC-20 approval flow: refreshes needsApproval and exposes the approve TX.
   const { approve } = useApproval()
+  // Toast surface — used to nudge users who try to swap without ticking the
+  // alpha-risk box. The button stays clickable in that state so the toast
+  // has a chance to fire and explain why nothing happened.
+  const toast = useToast()
+  const flashTimerRef = useRef<number | null>(null)
+  const [betaFlash, setBetaFlash] = useState(false)
+  const flashDisclaimer = useCallback(() => {
+    setBetaFlash(true)
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = window.setTimeout(() => setBetaFlash(false), 1500)
+    // Scroll the disclaimer aside into view so the user sees what they need
+    // to tick. Falls back to top-of-form if the ref hasn't mounted yet.
+    requestAnimationFrame(() => {
+      const el = document.querySelector('.sw-beta') as HTMLElement | null
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }, [])
 
   // Alpha-risk acknowledgement. Gates both funds-moving actions (Approve in
   // the mode block + Swap/Sign in the action button) until the user ticks the
@@ -220,6 +238,22 @@ export default function SwapPage() {
   const toTokenDisplay_ = outputToken ? toTokenDisplay(outputToken) : PLACEHOLDER_TOKEN
 
   function handleAction() {
+    // Funds-moving actions are gated on the alpha disclaimer. The button
+    // stays visually disabled but clickable in that state so we can fire
+    // a toast + flash the checkbox; otherwise the user clicks the dead
+    // button repeatedly and assumes the page is broken.
+    const isFundsAction =
+      actionState === 'approve' ||
+      actionState === 'swap-ready' ||
+      actionState === 'sign-broadcast'
+    if (isFundsAction && !accepted) {
+      toast.info({
+        title: 'Please acknowledge the beta disclaimer',
+        message: 'Tick the checkbox at the top of the form to enable swaps.',
+      })
+      flashDisclaimer()
+      return
+    }
     if (actionState === 'disconnected') {
       // Open wallet connect via external wallet as default
       wallet.connectExternalWallet?.()
@@ -342,6 +376,7 @@ export default function SwapPage() {
             onActionClick={handleAction}
             acknowledged={accepted}
             onAcknowledgedChange={setAccepted}
+            disclaimerFlash={betaFlash}
           />
 
           {quote && !activeOrder && inputToken && outputToken && (
