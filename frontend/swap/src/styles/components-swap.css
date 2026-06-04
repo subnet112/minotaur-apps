@@ -1583,6 +1583,26 @@
   color: var(--stone);
 }
 
+/* Flash animation — fires when the user clicks the action button without
+   having ticked the disclaimer. The page applies .is-flash for ~1.5s; the
+   keyframe pulses the border + adds a soft cretan glow so the box draws
+   the eye without being garish. */
+.sw-beta.is-flash {
+  animation: swBetaFlash 0.45s ease-in-out 3;
+}
+@keyframes swBetaFlash {
+  0%, 100% {
+    border-color: var(--cretan);
+    box-shadow: none;
+    background: rgba(220, 91, 29, 0.05);
+  }
+  50% {
+    border-color: var(--cretan);
+    box-shadow: 0 0 0 2px var(--cretan), 0 0 18px rgba(220, 91, 29, 0.55);
+    background: rgba(220, 91, 29, 0.16);
+  }
+}
+
 /* =========================================================================
    sw-action-help — small help line directly beneath the swap action button
    (used for the approve / approving copy that used to live in

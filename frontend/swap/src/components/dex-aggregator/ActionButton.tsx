@@ -56,11 +56,17 @@ const STATE_CONFIG: Record<ActionState, StateConfig> = {
 export default function ActionButton({ state, onClick, forceDisabled = false, tokenSymbol }: ActionButtonProps) {
   const cfg = STATE_CONFIG[state]
   const label = cfg.label.replace('{token}', tokenSymbol || 'USDC')
+  // `forceDisabled` (alpha-ack not ticked) renders the disabled look but keeps
+  // the button clickable so the parent can fire a toast + flash the
+  // disclaimer; `cfg.disabled` (in-flight / no-route / empty / etc.) is a
+  // real disable since clicking would be meaningless.
+  const looksDisabled = cfg.disabled || forceDisabled
   return (
     <button
-      className={`sw-cta ${cfg.modifier}`.trim()}
+      className={`sw-cta ${cfg.modifier} ${looksDisabled ? 'is-disabled' : ''}`.trim()}
       type="button"
-      disabled={cfg.disabled || forceDisabled}
+      disabled={cfg.disabled}
+      aria-disabled={looksDisabled}
       onClick={onClick}
     >
       {cfg.glyph === 'spinner' && <span className="spinner" aria-hidden="true" />}
