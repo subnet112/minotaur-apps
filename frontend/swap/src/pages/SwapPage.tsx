@@ -9,7 +9,7 @@
  *   - StateSwitcher is dropped (URL-state previewer is meaningless with
  *     real Zustand; useDevPreviewState handles URL-driven preview in dev)
  */
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSwapStore } from '@/store'
 import { useToast } from '@/components/shell'
 import { selectActionState, selectModeBlockVariant } from '@/selectors'
@@ -42,7 +42,7 @@ import HeaderIconButton from '@/components/dex-aggregator/HeaderIconButton'
 import SwapForm from '@/components/dex-aggregator/SwapForm'
 import TokenSelectorModal from '@/components/dex-aggregator/TokenSelectorModal'
 import WalletModeBlock from '@/components/dex-aggregator/WalletModeBlock'
-import QuoteCard from '@/components/dex-aggregator/QuoteCard'
+import SwapReviewCard from '@/components/dex-aggregator/SwapReviewCard'
 import OrderStatusCard from '@/components/dex-aggregator/OrderStatusCard'
 import SettingsSheet from '@/components/dex-aggregator/SettingsSheet'
 import RevealPanel from '@/components/dex-aggregator/RevealPanel'
@@ -124,6 +124,11 @@ export default function SwapPage() {
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     })
   }, [])
+
+  // 3-step flow: form → review → status. Only one card renders at a time.
+  // Status engages automatically when an order lands; "New swap" on the
+  // status card clears the order and brings us back to form.
+  const [flowStep, setFlowStep] = useState<'form' | 'review' | 'status'>('form')
 
   // Alpha-risk acknowledgement. Gates both funds-moving actions (Approve in
   // the mode block + Swap/Sign in the action button) until the user ticks the
@@ -240,15 +245,18 @@ export default function SwapPage() {
   const fromTokenDisplay = inputToken ? toTokenDisplay(inputToken) : PLACEHOLDER_TOKEN
   const toTokenDisplay_ = outputToken ? toTokenDisplay(outputToken) : PLACEHOLDER_TOKEN
 
-  function handleAction() {
-    // Funds-moving actions are gated on the alpha disclaimer. The button
-    // stays visually disabled but clickable in that state so we can fire
-    // a toast + flash the checkbox; otherwise the user clicks the dead
-    // button repeatedly and assumes the page is broken.
-    const isFundsAction =
-      actionState === 'approve' ||
-      actionState === 'swap-ready' ||
-      actionState === 'sign-broadcast'
+  // ── 3-step flow handlers ────────────────────────────────────────────────
+  // The form step's button shows "Review swap →" for any funds-ready state
+  // (approve / swap-ready / sign-broadcast); clicking it transitions to
+  // step 2 (SwapReviewCard) where the actual approve + submit happen.
+  // Non-funds states (disconnected / wrong-network) still act in-place
+  // because there's nothing to review.
+  const isFundsAction =
+    actionState === 'approve' ||
+    actionState === 'swap-ready' ||
+    actionState === 'sign-broadcast'
+
+  function handleFormAction() {
     if (isFundsAction && !accepted) {
       toast.info({
         title: 'Please acknowledge the beta disclaimer',
@@ -258,18 +266,32 @@ export default function SwapPage() {
       return
     }
     if (actionState === 'disconnected') {
-      // Open wallet connect via external wallet as default
       wallet.connectExternalWallet?.()
       return
     }
     if (actionState === 'wrong-network') {
-      // User needs to switch chain in their wallet — nothing to do here
+      // Wallet handles chain switching — nothing to do here
+      return
+    }
+    if (isFundsAction) {
+      // Transition to review step. The real approve + submit happens there.
+      setFlowStep('review')
+      return
+    }
+  }
+
+  function handleReviewAction() {
+    if (isFundsAction && !accepted) {
+      // Defense in depth — review shouldn't be reachable without ack, but
+      // if the user unticked after landing here we still gate.
+      toast.info({
+        title: 'Please acknowledge the beta disclaimer',
+        message: 'Go back to the form and tick the checkbox to continue.',
+      })
+      flashDisclaimer()
       return
     }
     if (actionState === 'approve') {
-      // ERC-20 allowance flow — folded into the swap button instead of a
-      // separate WalletModeBlock CTA. useApproval handles the writeContract
-      // + waitForTransactionReceipt + optimistic needsApproval clear.
       approve()
       return
     }
@@ -277,6 +299,69 @@ export default function SwapPage() {
       submitSwap()
     }
   }
+
+  // Auto-transition: activeOrder appearing means submitSwap landed. Move
+  // to status step. Disappearing (after onNewSwap clears it) means user
+  // wants to start over — back to form step.
+  useEffect(() => {
+    if (activeOrder) {
+      setFlowStep('status')
+    } else if (flowStep === 'status') {
+      setFlowStep('form')
+    }
+  }, [activeOrder, flowStep])
+
+  // If the user navigates to review but the quote evaporates (expired,
+  // input cleared, etc.), bounce back to form so they're not staring at
+  // an empty review card.
+  useEffect(() => {
+    if (flowStep === 'review' && !quote) {
+      setFlowStep('form')
+    }
+  }, [flowStep, quote])
+
+  // Build the QuoteDisplay shape the review card consumes — only when
+  // we actually have a quote and both tokens (mappers crash otherwise).
+  const reviewQuoteDisplay = useMemo(() => {
+    if (!quote || !inputToken || !outputToken) return null
+    return {
+      ...mapQuoteResultToQuoteCardProps(
+        quote,
+        inputToken,
+        outputToken,
+        inputAmount,
+        quoteExpiry ?? 0,
+      ),
+      comparison: mapExternalComparisonToCardRows(
+        externalQuotes,
+        quote.estimated_output,
+        outputToken.decimals,
+      ),
+    }
+  }, [quote, inputToken, outputToken, inputAmount, quoteExpiry, externalQuotes])
+
+  // Approve-state explainer copy mirrored across form + review steps so
+  // the user sees the same help regardless of where they happen to be.
+  const approveHelpText: React.ReactNode = (
+    actionState === 'approving' ? (
+      <>
+        Approval submitted — waiting for the transaction to confirm. Cancel from
+        your wallet to release the slot.
+      </>
+    ) : actionState === 'approve' ? (
+      <>
+        One-time approval for{' '}
+        <span className="b">{inputToken?.symbol || 'this token'}</span>. Enable{' '}
+        <span className="b">Unlimited Approval</span> in settings to skip this on
+        future swaps.
+      </>
+    ) : null
+  )
+
+  // What label does the form button show? In funds-ready states we say
+  // "Review swap →"; otherwise the state's own label (e.g. "Enter amount",
+  // "Insufficient USDC", "Fetching quote…") wins.
+  const formActionLabel = isFundsAction ? 'Review swap' : undefined
 
   return (
     <>
@@ -293,118 +378,100 @@ export default function SwapPage() {
       />
 
       <section className="dex-stage" aria-label="Swap content">
-        <div className="dex-content">
-          {modeBlockVariant && (
+        <div className="dex-content" data-flow-step={flowStep}>
+          {/* WalletModeBlock — 'native-eth' / 'setup-proxy' contextual
+              notices. Only relevant during input editing, so we pin it
+              to the form step. (Approval mode block was dropped earlier;
+              that lives on the action button now.) */}
+          {flowStep === 'form' && modeBlockVariant && (
             <div className="sw-stack">
-              {/* WalletModeBlock no longer owns the approval CTA — that lives on
-                  the swap button itself now (selectActionState → 'approve'). The
-                  remaining variants ('native-eth', 'setup-proxy') are passive
-                  notices without click targets, so no onCtaClick wiring needed. */}
               <WalletModeBlock variant={modeBlockVariant} />
             </div>
           )}
 
-          <SwapForm
-            {...swapFormBase}
-            // Restrict chain dropdown to chains where this App is actually
-            // deployed (populated by useAppBootstrap from /v1/apps/{id}/status).
-            // Empty array = fall back to all configured chains (legacy path).
-            supportedChainIds={appSupportedChains}
-            // Cross-chain pill is hidden until the App ships bridge legs.
-            // Defaults to false on SwapForm; explicit here for grep-ability.
-            crossChainEnabled={false}
-            headerRight={
-              // Recent-swaps history lives in the wallet dropdown now
-              // (AppWalletButton → .wm-recent). The dev-only debug toggle
-              // stays for local testing.
-              import.meta.env.DEV ? (
-                <HeaderIconButton
-                  role="debug"
-                  active={showDebug}
-                  onClick={() => setShowDebug(!showDebug)}
-                />
-              ) : undefined
-            }
-            fromToken={fromTokenDisplay}
-            toToken={toTokenDisplay_}
-            fromAmount={inputAmount}
-            // No price oracle yet — keep the slot but don't render a fake $ value.
-            fromUsd=""
-            // estimated_output is a raw integer in outputToken's smallest
-            // unit. Format with outputToken.decimals so the field shows e.g.
-            // "0.000472" instead of "472838882988870". TokenDisplay doesn't
-            // carry decimals — use the underlying Token from the store.
-            toAmount={
-              quote && outputToken
-                ? formatTokenAmount(quote.estimated_output, outputToken.decimals)
-                : ''
-            }
-            toUsd=""
-            toIsQuoted={!!quote && !loading}
-            cross={isCrossChain}
-            onToggleCross={() => useSwapStore.setState({ isCrossChain: !isCrossChain })}
-            onChangeAmount={(v) => useSwapStore.getState().setInputAmount(v)}
-            onMaxClick={() => {
-              const bal = useSwapStore.getState().inputBalance
-              if (bal && bal !== '0') useSwapStore.getState().setInputAmount(bal)
-            }}
-            onPickFromChain={(id) => { useSwapStore.getState().setSourceChainId(id); void wallet.switchChain(id) }}
-            onPickToChain={(id) => { useSwapStore.setState({ chainId: id }); void wallet.switchChain(id) }}
-            showRecipient={isCrossChain && walletMode === 'bittensor'}
-            recipientValid={
-              isCrossChain && walletMode === 'bittensor'
-                ? /^0x[a-fA-F0-9]{40}$/.test(evmRecipient)
-                : true
-            }
-            recipientValue={evmRecipient}
-            onChangeRecipient={(v) => useSwapStore.getState().setEvmRecipient(v, 'manual')}
-            onMetaMaskRecipient={async () => {
-              // If the user is already connected via RainbowKit, use that
-              // address as the recipient. Otherwise pop the connect modal
-              // and let them choose a connector — they'll have to click
-              // again once connected.
-              const { walletAddress, walletConnected } = useSwapStore.getState()
-              if (walletConnected && walletAddress) {
-                useSwapStore.getState().setEvmRecipient(walletAddress, 'metamask')
-              } else {
-                wallet.connectExternalWallet?.()
+          {flowStep === 'form' && (
+            <SwapForm
+              {...swapFormBase}
+              supportedChainIds={appSupportedChains}
+              crossChainEnabled={false}
+              headerRight={
+                import.meta.env.DEV ? (
+                  <HeaderIconButton
+                    role="debug"
+                    active={showDebug}
+                    onClick={() => setShowDebug(!showDebug)}
+                  />
+                ) : undefined
               }
-            }}
-            onSwapDirection={() => swapTokens()}
-            onPickFromToken={() => setTokenSelectorOpen('input')}
-            onPickToToken={() => setTokenSelectorOpen('output')}
-            onOpenSettings={() => setShowSettings(true)}
-            wallet={designWallet}
-            actionState={actionState}
-            onActionClick={handleAction}
-            acknowledged={accepted}
-            onAcknowledgedChange={setAccepted}
-            disclaimerFlash={betaFlash}
-          />
-
-          {quote && !activeOrder && inputToken && outputToken && (
-            <QuoteCard
-              quote={{
-                ...mapQuoteResultToQuoteCardProps(
-                  quote,
-                  inputToken,
-                  outputToken,
-                  inputAmount,
-                  quoteExpiry ?? 0,
-                ),
-                // Overlay the QuoteResult.comparison_quotes (currently unset
-                // by the API) with the CoW Swap + Paraswap rows the
-                // useComparisonQuotes hook fetched against their public APIs.
-                comparison: mapExternalComparisonToCardRows(
-                  externalQuotes,
-                  quote.estimated_output,
-                  outputToken.decimals,
-                ),
+              fromToken={fromTokenDisplay}
+              toToken={toTokenDisplay_}
+              fromAmount={inputAmount}
+              fromUsd=""
+              toAmount={
+                quote && outputToken
+                  ? formatTokenAmount(quote.estimated_output, outputToken.decimals)
+                  : ''
+              }
+              toUsd=""
+              toIsQuoted={!!quote && !loading}
+              cross={isCrossChain}
+              onToggleCross={() => useSwapStore.setState({ isCrossChain: !isCrossChain })}
+              onChangeAmount={(v) => useSwapStore.getState().setInputAmount(v)}
+              onMaxClick={() => {
+                const bal = useSwapStore.getState().inputBalance
+                if (bal && bal !== '0') useSwapStore.getState().setInputAmount(bal)
               }}
+              onPickFromChain={(id) => { useSwapStore.getState().setSourceChainId(id); void wallet.switchChain(id) }}
+              onPickToChain={(id) => { useSwapStore.setState({ chainId: id }); void wallet.switchChain(id) }}
+              showRecipient={isCrossChain && walletMode === 'bittensor'}
+              recipientValid={
+                isCrossChain && walletMode === 'bittensor'
+                  ? /^0x[a-fA-F0-9]{40}$/.test(evmRecipient)
+                  : true
+              }
+              recipientValue={evmRecipient}
+              onChangeRecipient={(v) => useSwapStore.getState().setEvmRecipient(v, 'manual')}
+              onMetaMaskRecipient={async () => {
+                const { walletAddress, walletConnected } = useSwapStore.getState()
+                if (walletConnected && walletAddress) {
+                  useSwapStore.getState().setEvmRecipient(walletAddress, 'metamask')
+                } else {
+                  wallet.connectExternalWallet?.()
+                }
+              }}
+              onSwapDirection={() => swapTokens()}
+              onPickFromToken={() => setTokenSelectorOpen('input')}
+              onPickToToken={() => setTokenSelectorOpen('output')}
+              onOpenSettings={() => setShowSettings(true)}
+              wallet={designWallet}
+              actionState={actionState}
+              onActionClick={handleFormAction}
+              acknowledged={accepted}
+              onAcknowledgedChange={setAccepted}
+              disclaimerFlash={betaFlash}
+              forceActionLabel={formActionLabel}
             />
           )}
 
-          {activeOrder && (
+          {flowStep === 'review' && reviewQuoteDisplay && (
+            <SwapReviewCard
+              quote={reviewQuoteDisplay}
+              actionState={actionState}
+              onActionClick={handleReviewAction}
+              onBack={() => setFlowStep('form')}
+              tokenSymbol={inputToken?.symbol}
+              forceDisabled={
+                !accepted && (
+                  actionState === 'approve' ||
+                  actionState === 'swap-ready' ||
+                  actionState === 'sign-broadcast'
+                )
+              }
+              helpText={approveHelpText}
+            />
+          )}
+
+          {flowStep === 'status' && activeOrder && (
             <OrderStatusCard
               step={activeOrder.status}
               orderId={activeOrder.order_id}
@@ -419,12 +486,10 @@ export default function SwapPage() {
               onNewSwap={() => {
                 useSwapStore.getState().setActiveOrder(null)
                 useSwapStore.getState().setInputAmount('')
+                setFlowStep('form')
               }}
             />
           )}
-
-          {/* History panel removed — Recent swaps now lives in the
-              wallet-button dropdown (AppWalletButton → .wm-recent). */}
 
           {import.meta.env.DEV && showDebug && (
             <RevealPanel
