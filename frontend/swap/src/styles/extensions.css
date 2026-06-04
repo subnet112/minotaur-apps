@@ -512,4 +512,128 @@
   gap: 14px;
 }
 
+/* =========================================================================
+   UserOrdersPage (.uord-*) — wallet-scoped order history at /swap/orders.
+
+   Lives inside the same .dex-stage / .dex-content container as the swap
+   form so the page width and bg match seamlessly. Table is a 4-col CSS
+   grid; rows share a single grid template so columns line up.
+   ========================================================================= */
+.uord-content { gap: 20px; }
+
+.uord-head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--hairline-strong);
+  padding-bottom: 16px;
+}
+.uord-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--stone);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+}
+.uord-back:hover { color: var(--bone); }
+.uord-title {
+  flex: 1;
+  margin: 0;
+  font-family: var(--display);
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--bone-pure);
+}
+.uord-wallet {
+  font-size: 11px;
+  color: var(--stone);
+  letter-spacing: 0.06em;
+}
+
+.uord-empty {
+  padding: 36px 16px;
+  text-align: center;
+  color: var(--stone);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.uord-empty.is-error { color: var(--cretan); }
+.uord-link {
+  color: var(--lime);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.uord-link:hover { text-decoration: underline; }
+
+.uord-table {
+  display: flex;
+  flex-direction: column;
+}
+.uord-row {
+  display: grid;
+  grid-template-columns: 100px 110px 1fr 120px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12px;
+  color: var(--bone);
+}
+.uord-row-h {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--stone);
+  border-bottom: 1px solid var(--hairline-strong);
+}
+.uord-row:last-child { border-bottom: 0; }
+.uord-when { color: var(--stone); font-size: 11px; }
+.uord-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  width: fit-content;
+}
+.uord-status-ok      { color: var(--lime); }
+.uord-status-fail    { color: var(--cretan); }
+.uord-status-pending { color: var(--stone); }
+.uord-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.uord-pair .arrow { color: var(--stone); }
+.uord-pair .sym { color: var(--bone-pure); }
+.uord-tx { font-size: 11px; }
+.uord-tx a { color: var(--lime); text-decoration: none; }
+.uord-tx a:hover { text-decoration: underline; }
+.uord-tx .dim { color: var(--stone); }
+
+@media (max-width: 540px) {
+  .uord-row {
+    grid-template-columns: 80px 90px 1fr;
+  }
+  .uord-row > :nth-child(4) { display: none; }
+}
+
 /* State switcher — chips that drive the URL params */

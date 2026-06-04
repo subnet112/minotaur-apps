@@ -14,6 +14,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useDisconnect } from 'wagmi'
 import { useToast } from '@/components/shell'
@@ -48,6 +49,10 @@ export default function AppWalletButton() {
   const toast = useToast()
   const { disconnect } = useDisconnect()
   const recentSwaps = useSwapStore((s) => s.recentSwaps)
+  // useNavigate works here because portals preserve React context — the
+  // dropdown's DOM lives under document.body but the React tree (incl.
+  // BrowserRouter) is still above us.
+  const navigate = useNavigate()
 
   // Position the portal-rendered dropdown right under the button. Recomputed
   // on open and whenever the window resizes — we use fixed positioning, so
@@ -149,6 +154,7 @@ export default function AppWalletButton() {
                     }}
                     onSwitchChain={() => { openChainModal(); setMenuOpen(false) }}
                     onSwitchWallet={() => { openConnectModal(); setMenuOpen(false) }}
+                    onViewOrders={() => { navigate('/orders'); setMenuOpen(false) }}
                     onDisconnect={() => { disconnect(); setMenuOpen(false) }}
                   />
                 </div>
@@ -169,13 +175,14 @@ interface DropdownBodyProps {
   onCopy: () => void
   onSwitchChain: () => void
   onSwitchWallet: () => void
+  onViewOrders: () => void
   onDisconnect: () => void
 }
 
 // Just the inner contents of the dropdown. The outer .app-wallet-menu
 // wrapper is rendered by AppWalletButton's portal so it can be portalled
 // directly into document.body with its own fixed positioning.
-function DropdownBody({ address, chainName, recentSwaps, onCopy, onSwitchChain, onSwitchWallet, onDisconnect }: DropdownBodyProps) {
+function DropdownBody({ address, chainName, recentSwaps, onCopy, onSwitchChain, onSwitchWallet, onViewOrders, onDisconnect }: DropdownBodyProps) {
   return (
     <>
       <span className="ct tl" aria-hidden="true" />
@@ -243,14 +250,16 @@ function DropdownBody({ address, chainName, recentSwaps, onCopy, onSwitchChain, 
         </div>
       )}
 
-      {/* The swap lives in an iframe at app.minotaursubnet.com/swap/; the
-          orders page is at the outer app's /orders. target="_top" breaks
-          out of the iframe — same origin so no x-frame issues. */}
-      <a className="item wm-view-all" href="/orders" target="_top" rel="noopener">
+      {/* Wallet-scoped order history at /orders (inside the swap iframe).
+          The parent passes useNavigate via onViewOrders so the click stays
+          a pure SPA nav — no full reload, no target="_top" iframe break-out
+          (which used to dump the user onto apps/app's network-wide /orders,
+          a different page). */}
+      <button className="item wm-view-all" type="button" onClick={onViewOrders} role="menuitem">
         <span className="ico"><ArrowIcon /></span>
-        <span>View all orders</span>
-        <span className="kbd">↗</span>
-      </a>
+        <span>My orders</span>
+        <span className="kbd">→</span>
+      </button>
 
       <div className="app-wallet-menu-list">
         <button className="item is-danger" type="button" onClick={onDisconnect} role="menuitem">
