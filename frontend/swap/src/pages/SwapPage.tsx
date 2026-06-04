@@ -70,7 +70,10 @@ function toTokenDisplay(t: Token): TokenDisplay {
     symbol: t.symbol,
     name: t.name ?? t.symbol,
     glyph: t.symbol.charAt(0).toUpperCase(),
-    iconClass: iconMap[sym] ?? 'usdc',
+    // Unknown tokens fall back to neutral grey ('unknown'), NOT 'usdc'.
+    // Defaulting to 'usdc' made every unrecognised token (AERO, DEGEN,
+    // BRETT, etc. on Base) look like the USDC icon, which was misleading.
+    iconClass: iconMap[sym] ?? 'unknown',
     balance: '—',
     usd: '$0.00',
   }

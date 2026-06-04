@@ -209,6 +209,7 @@
 .sw-chain .logo.arb { background: rgba(40,150,220,0.18); border-color: rgba(40,150,220,0.6); color: #b8e0f7; }
 .sw-chain .logo.base { background: rgba(28,99,243,0.18); border-color: rgba(28,99,243,0.55); color: #c1d4ff; }
 .sw-chain .logo.bittensor { background: rgba(220,91,29,0.18); border-color: rgba(220,91,29,0.55); color: #f5c3a5; }
+.sw-chain .logo.unknown { background: rgba(180,180,180,0.08); border-color: var(--hairline-stronger); color: var(--bone); }
 .sw-chain .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bone); }
 .sw-chain .chev { color: var(--mist); flex: 0 0 auto; }
 .sw-chain .eyebrow {
@@ -396,6 +397,10 @@
 .sw-tok .ico.wbtc { background: rgba(220,91,29,0.22); border-color: rgba(220,91,29,0.55); color: #f6c8a8; }
 .sw-tok .ico.tao { background: rgba(220,91,29,0.18); border-color: rgba(220,91,29,0.45); color: #f0bf9c; }
 .sw-tok .ico.alpha { background: rgba(180,180,180,0.10); border-color: var(--hairline-stronger); color: var(--bone); }
+/* Unknown tokens — anything not in the curated icon list (AERO, BRETT,
+   custom imports, etc.). Same neutral treatment as .alpha so unknowns
+   don't get confused with a curated token's color. */
+.sw-tok .ico.unknown { background: rgba(180,180,180,0.08); border-color: var(--hairline-stronger); color: var(--bone); }
 .sw-tok .ico.usdt { background: rgba(50,180,135,0.20); border-color: rgba(50,180,135,0.55); color: #b6e6cf; }
 .sw-tok .ico.dai { background: rgba(250,200,80,0.20); border-color: rgba(250,200,80,0.55); color: #f7dba2; }
 .sw-tok .ico.arb { background: rgba(40,150,220,0.20); border-color: rgba(40,150,220,0.55); color: #b8e0f7; }
@@ -626,6 +631,7 @@
 .sw-tmod-row .ico.arb { background: rgba(40,150,220,0.20); border-color: rgba(40,150,220,0.55); color: #b8e0f7; }
 .sw-tmod-row .ico.tao { background: rgba(220,91,29,0.18); border-color: rgba(220,91,29,0.45); color: #f0bf9c; }
 .sw-tmod-row .ico.alpha { background: rgba(180,180,180,0.10); color: var(--bone); }
+.sw-tmod-row .ico.unknown { background: rgba(180,180,180,0.08); color: var(--bone); }
 .sw-tmod-row .ico.link { background: rgba(50,90,210,0.20); border-color: rgba(50,90,210,0.55); color: #c0d0f5; }
 
 .sw-tmod-row .meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
