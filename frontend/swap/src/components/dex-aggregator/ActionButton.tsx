@@ -25,6 +25,11 @@ interface ActionButtonProps {
    *  approving / insufficient). Falls back to "USDC" if unset, matching
    *  the original hardcoded copy. */
   tokenSymbol?: string
+  /** Override the state-machine label entirely. Used by the form step in
+   *  the 3-step flow to relabel ready states as "Review swap →" — the
+   *  click still routes through to the page handler, which decides
+   *  whether to transition or fire a disclaimer toast. */
+  forceLabel?: string
 }
 
 interface StateConfig {
@@ -53,9 +58,9 @@ const STATE_CONFIG: Record<ActionState, StateConfig> = {
   'enter-recipient':{ modifier: 'is-empty',        label: 'Enter recipient',    disabled: true,  glyph: 'none' },
 }
 
-export default function ActionButton({ state, onClick, forceDisabled = false, tokenSymbol }: ActionButtonProps) {
+export default function ActionButton({ state, onClick, forceDisabled = false, tokenSymbol, forceLabel }: ActionButtonProps) {
   const cfg = STATE_CONFIG[state]
-  const label = cfg.label.replace('{token}', tokenSymbol || 'USDC')
+  const label = forceLabel ?? cfg.label.replace('{token}', tokenSymbol || 'USDC')
   // `forceDisabled` (alpha-ack not ticked) renders the disabled look but keeps
   // the button clickable so the parent can fire a toast + flash the
   // disclaimer; `cfg.disabled` (in-flight / no-route / empty / etc.) is a

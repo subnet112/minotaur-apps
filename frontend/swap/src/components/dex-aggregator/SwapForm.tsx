@@ -116,6 +116,11 @@ interface SwapFormProps {
    *  who clicked the disabled action button see what they need to tick. The
    *  page (SwapPage) drives the timing — this prop is only the visual hook. */
   disclaimerFlash?: boolean
+
+  /** Override the action button's label. Used in the 3-step flow so the
+   *  form's button says "Review swap →" instead of "Approve" / "Swap" /
+   *  "Sign & broadcast" — those happen on step 2. */
+  forceActionLabel?: string
 }
 
 export default function SwapForm(props: SwapFormProps) {
@@ -409,11 +414,15 @@ export default function SwapForm(props: SwapFormProps) {
 
         {/* Action button (state machine — see 00.27). Blocked on the
             sw-beta acknowledgement at the top of the form for the
-            funds-moving states (Approve / Swap / Sign). */}
+            funds-moving states (Approve / Swap / Sign). In the 3-step
+            flow, props.forceActionLabel overrides the label so the
+            button reads "Review swap →" on step 1; the actual approve /
+            submit happens on step 2 (SwapReviewCard). */}
         <ActionButton
           state={props.actionState}
           onClick={props.onActionClick}
           tokenSymbol={props.fromToken?.symbol}
+          forceLabel={props.forceActionLabel}
           forceDisabled={
             !props.acknowledged && (
               props.actionState === 'approve' ||
