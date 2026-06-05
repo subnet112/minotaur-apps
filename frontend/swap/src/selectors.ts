@@ -76,12 +76,12 @@ export function selectActionState(s: SelectableState): ActionState {
 }
 
 export function selectModeBlockVariant(s: SelectableState): ModeBlock | null {
-  // 'create-wallet' / 'fund-wallet' variants retired with the managed-wallet
-  // flow removal. 'approval' + 'approving' moved onto the swap button itself
-  // (see selectActionState → 'approve' / 'approving'); WalletModeBlock no
-  // longer fires for those — keeping just the contextual notices that don't
-  // map naturally to a button state (native ETH broadcast, bittensor proxy).
-  if (s.inputToken?.native) return 'native-eth'
+  // 'create-wallet' / 'fund-wallet' retired with the managed-wallet flow
+  // removal. 'approval' / 'approving' moved onto the swap button itself.
+  // 'native-eth' retired with the contract's auto-wrap support — the
+  // direct-submit flow in useOrderSubmission handles msg.value transparently,
+  // so there's nothing to surface as a contextual notice anymore. Only
+  // 'setup-proxy' for the Bittensor flow remains.
   if (s.walletMode === 'bittensor' && !s.bittensorProxySetup) return 'setup-proxy'
   return null
 }
