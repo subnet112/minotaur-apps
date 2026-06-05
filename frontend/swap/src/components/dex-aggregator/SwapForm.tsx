@@ -432,27 +432,12 @@ export default function SwapForm(props: SwapFormProps) {
           }
         />
 
-        {/* Approval help text — design 00.26's approval body, now beneath
-            the action button instead of in a contextual notice above the
-            form. Renders only while the button is in the approve / approving
-            state so it doesn't add chrome to ordinary swaps. */}
-        {(props.actionState === 'approve' || props.actionState === 'approving') && (
-          <p className="sw-action-help">
-            {props.actionState === 'approving' ? (
-              <>
-                Approval submitted — waiting for the transaction to confirm. Cancel from
-                your wallet to release the slot.
-              </>
-            ) : (
-              <>
-                One-time approval for{' '}
-                <span className="b">{props.fromToken?.symbol || 'this token'}</span>. Enable{' '}
-                <span className="b">Unlimited Approval</span> in settings to skip this on
-                future swaps.
-              </>
-            )}
-          </p>
-        )}
+        {/* Approval help text moved to SwapReviewCard — the form's button
+            now says "Review swap →" for the approve/swap-ready/sign-broadcast
+            states, so a "One-time approval for USDC…" line beneath it would
+            be misleading. SwapPage passes the same copy to the review card
+            via the `helpText` prop where the actual Approve / Confirm button
+            lives. */}
       </div>
     </form>
   )
