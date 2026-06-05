@@ -36,9 +36,13 @@ interface TokenSelectorModalProps {
   /** When false (or omitted), the import row is never shown. */
   canImport?: boolean
   /**
-   * Which token slot is being selected. When 'input' and a WETH alternative
-   * exists in the list, native ETH rows are rendered disabled with a
-   * "(wrap first)" label — F21 UX guard.
+   * Which token slot is being selected. Kept for layout signaling — the
+   * native-ETH "wrap first" disable that used to live here was retired
+   * once the DexAggregator contract gained auto-wrap support: the
+   * validator's prepareDirectSubmit endpoint returns the right
+   * `value` (msg.value), AppIntentBase._fundAndExecute wraps to WETH on
+   * the user's behalf, and useOrderSubmission sends the TX with
+   * msg.value set. Selecting native ETH on input is now seamless.
    */
   sideOpen?: 'input' | 'output'
 }
@@ -50,18 +54,11 @@ export default function TokenSelectorModal({
   onClose,
   onCustomImport,
   canImport = false,
-  sideOpen,
+  sideOpen: _sideOpen,
 }: TokenSelectorModalProps) {
   const [query, setQuery] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
-
-  // F21 UX guard: when selecting the INPUT token, disable native ETH rows if a
-  // WETH alternative is present in the list. The contract's executeIntent is not
-  // payable, so native ETH input reverts on-chain. User must wrap to WETH first.
-  const wethPresent = sideOpen === 'input' && tokens.some(
-    (t) => !t.native && t.symbol.toUpperCase() === 'WETH',
-  )
 
   // Esc dismisses.
   useEffect(() => {
@@ -212,7 +209,6 @@ export default function TokenSelectorModal({
                   key={t.address ?? t.symbol}
                   token={t}
                   disabled={t.symbol === oppositeSymbol}
-                  nativeDisabled={!!(t.native && wethPresent)}
                   onClick={() => {
                     onSelect(t)
                     onClose()
@@ -233,7 +229,6 @@ export default function TokenSelectorModal({
                   key={t.address ?? t.symbol}
                   token={t}
                   disabled={t.symbol === oppositeSymbol}
-                  nativeDisabled={!!(t.native && wethPresent)}
                   onClick={() => {
                     onSelect(t)
                     onClose()
@@ -251,29 +246,23 @@ export default function TokenSelectorModal({
 function TokenRow({
   token,
   disabled,
-  nativeDisabled = false,
   onClick,
 }: {
   token: TokenDisplay
   disabled: boolean
-  /** True when this is a native token and WETH is available — F21 guard. */
-  nativeDisabled?: boolean
   onClick: () => void
 }) {
-  const isDisabled = disabled || nativeDisabled
-  // Renders as <div role="button"> — matches the prototype HTML which
-  // uses <div class="sw-tmod-row">. A <button> here breaks the row's
-  // CSS grid because of the browser-default `width: auto` +
-  // `text-align: center` on buttons, which produces ragged-width rows.
+  // F21 "wrap first" disable retired with the contract's auto-wrap
+  // support — only the "already selected" disable remains.
   return (
     <div
-      className={`sw-tmod-row ${isDisabled ? 'is-disabled' : ''}`.trim()}
+      className={`sw-tmod-row ${disabled ? 'is-disabled' : ''}`.trim()}
       role="button"
-      tabIndex={isDisabled ? -1 : 0}
-      aria-disabled={isDisabled}
-      onClick={isDisabled ? undefined : onClick}
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      onClick={disabled ? undefined : onClick}
       onKeyDown={(e) => {
-        if (isDisabled) return
+        if (disabled) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onClick()
@@ -282,17 +271,12 @@ function TokenRow({
     >
       <span className={`ico ${token.iconClass}`}>{token.glyph}</span>
       <span className="meta">
-        <span className="sym">
-          {token.symbol}
-          {nativeDisabled ? ' (wrap first)' : ''}
-        </span>
+        <span className="sym">{token.symbol}</span>
         <span className="name">{token.name}</span>
       </span>
       <span className="right">
         {disabled ? (
           <span className="dis">Already selected</span>
-        ) : nativeDisabled ? (
-          <span className="dis">Wrap to WETH first</span>
         ) : (
           <>
             <span className="bal">{token.balance}</span>

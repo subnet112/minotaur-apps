@@ -371,10 +371,72 @@ export function useOrderSubmission() {
           // A hardcoded relative fetch here used to silently 404 in production
           // because CloudFront doesn't proxy /api/* to the backend.
           await api.attachSignature(order.order_id, userSignature)
-          // Signature attached — update back to generic "submitting" while the
-          // relayer picks up the order. The success transition happens below
-          // once store.setActiveOrder is called.
-          toast.update(submitId, { variant: 'loading', title: 'Order signed, waiting for relayer…' })
+
+          // Native ETH path — direct submission with msg.value.
+          //
+          // For ERC-20 input the relayer pays gas and sends the on-chain
+          // executeIntent TX from a relayer hot wallet; user just signs.
+          // For NATIVE ETH input the relayer can't help — the contract's
+          // _fundAndExecute needs `msg.value > 0` AND the submitter to be
+          // the user (so the auto-wrap deposits to WETH and the proxy can
+          // pull). We ask the validator for the prepared calldata + value
+          // (it already knows how to encode the 12-field SWAP params with
+          // the right wrapped-token address) and let the user broadcast.
+          if (store.inputToken?.native) {
+            toast.update(submitId, {
+              variant: 'loading',
+              title: 'Preparing the transaction…',
+            })
+            const direct = await api.prepareDirectSubmit(order.order_id)
+            toast.update(submitId, {
+              variant: 'loading',
+              title: 'Confirm the swap in your wallet…',
+            })
+            let txHash: `0x${string}`
+            try {
+              txHash = await walletClient.sendTransaction({
+                account: addr as Address,
+                to: direct.contract_address as Address,
+                data: direct.calldata as `0x${string}`,
+                value: BigInt(direct.value),
+                chainId: store.chainId,
+              })
+            } catch (broadcastErr: any) {
+              // User rejected in wallet — cancel the order server-side so
+              // it doesn't sit "open" forever and clog `/orders`. Best-effort:
+              // if cancel fails the order will expire on its own deadline.
+              if (
+                broadcastErr?.code === 'ACTION_REJECTED'
+                || broadcastErr?.code === 4001
+                || broadcastErr?.name === 'UserRejectedRequestError'
+              ) {
+                await api.cancelOrder(order.order_id).catch(() => undefined)
+                toast.update(submitId, {
+                  variant: 'error',
+                  title: 'Transaction rejected',
+                  message: 'Order cancelled',
+                })
+                store.setSubmitting(false)
+                return
+              }
+              throw broadcastErr
+            }
+            toast.update(submitId, {
+              variant: 'loading',
+              title: 'Transaction broadcast — waiting for confirmation…',
+              message: shorten(txHash, 8),
+            })
+            // Tell the API the TX is in flight; it'll watch the chain and
+            // flip status to 'filled' / 'failed' on confirmation, which the
+            // existing pollOrderStatus loop below will pick up.
+            await api.confirmUserSubmittedTx(order.order_id, txHash)
+          } else {
+            // ERC-20 input — relayer picks it up; gasless UX preserved.
+            toast.update(submitId, {
+              variant: 'loading',
+              title: 'Order signed, waiting for relayer…',
+            })
+          }
         } catch (sigErr: any) {
           // viem throws UserRejectedRequestError on user-reject (code 4001
           // preserved per EIP-1193). Keep the legacy ACTION_REJECTED check
