@@ -44,7 +44,7 @@ export type DesignWalletMode = 'disconnected' | 'metamask' | 'bittensor'
 export type OrderStep = 'pending' | 'open' | 'solved' | 'scored' | 'consensus' | 'filled' | 'failed'
 export type ActionState =
   | 'disconnected' | 'wrong-network' | 'empty' | 'insufficient'
-  | 'fetching' | 'no-route' | 'approve' | 'approving' | 'swap-ready'
+  | 'fetching' | 'no-route' | 'wrap' | 'wrapping' | 'approve' | 'approving' | 'swap-ready'
   | 'sign-broadcast' | 'submitting' | 'awaiting-sig' | 'enter-recipient'
 export type ModeBlock =
   | 'none' | 'approval'
