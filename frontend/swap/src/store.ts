@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Token, QuoteResult, OrderResult, WalletInfo, WalletMode, SwapHistoryItem } from './types'
-import { TOKENS, DEFAULT_CHAIN_ID } from '@/config/chains'
+import { TOKENS, DEFAULT_CHAIN_ID, CHAIN_CONFIG } from '@/config/chains'
 
 /** Cached solver-token list per chain. The validator's /v1/chains/{id}/tokens
  *  is ~400ms server-side and gated by a CORS preflight on first request, so
@@ -81,6 +81,10 @@ interface SwapState {
   // Approval
   needsApproval: boolean
   approving: boolean
+  // Wrap (native ETH input only). The relayer can't attach msg.value, so
+  // native ETH must be wrapped to WETH and then approved before swapping.
+  needsWrap: boolean
+  wrapping: boolean
 
   // Status
   loading: boolean
@@ -146,6 +150,8 @@ interface SwapActions {
   // Approval
   setNeedsApproval: (v: boolean) => void
   setApproving: (v: boolean) => void
+  setNeedsWrap: (v: boolean) => void
+  setWrapping: (v: boolean) => void
   checkAllowance: () => Promise<void>
 
   // Status
@@ -213,6 +219,8 @@ const initialState: SwapState = {
 
   needsApproval: false,
   approving: false,
+  needsWrap: false,
+  wrapping: false,
 
   loading: false,
   submitting: false,
@@ -309,17 +317,31 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   // Approval
   setNeedsApproval: (v) => set({ needsApproval: v }),
   setApproving: (v) => set({ approving: v }),
+  setNeedsWrap: (v) => set({ needsWrap: v }),
+  setWrapping: (v) => set({ wrapping: v }),
   checkAllowance: async () => {
     const s = get()
-    if (s.walletMode !== 'external' || !s.inputToken || s.inputToken.native) {
-      set({ needsApproval: false })
+    if (s.walletMode !== 'external' || !s.inputToken) {
+      set({ needsApproval: false, needsWrap: false })
       return
     }
     const addr = s.getActiveAddress()
     const contract = s.contractAddress
     const amount = s.quote?.ready_params?.input_amount || s.inputAmount || '0'
     if (!addr || !contract || !amount || amount === '0') {
-      set({ needsApproval: false })
+      set({ needsApproval: false, needsWrap: false })
+      return
+    }
+    // Native ETH can't ride along as msg.value through the relayer, so we
+    // settle it as WETH: the user wraps ETH→WETH, then approves WETH. Both
+    // the allowance probe and the wrap-needed probe therefore target the
+    // wrapped-native token, not the 0xEeee… native sentinel.
+    const isNative = !!s.inputToken.native
+    const tokenAddr = isNative
+      ? CHAIN_CONFIG[s.chainId]?.wrappedNative
+      : s.inputToken.address
+    if (!tokenAddr) {
+      set({ needsApproval: false, needsWrap: false })
       return
     }
     try {
@@ -332,16 +354,29 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
         import('@/config/wagmi'),
       ])
       const client = getPublicClient(wagmiConfig, { chainId: s.chainId })
-      if (!client) { set({ needsApproval: false }); return }
+      if (!client) { set({ needsApproval: false, needsWrap: false }); return }
+      const want = BigInt(String(amount))
+      // Native input: does the user hold enough WETH yet, or must they wrap?
+      if (isNative) {
+        const wethBal = await client.readContract({
+          address: tokenAddr as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [addr as `0x${string}`],
+        })
+        set({ needsWrap: BigInt(wethBal as bigint) < want })
+      } else {
+        set({ needsWrap: false })
+      }
       const allowance = await client.readContract({
-        address: s.inputToken.address as `0x${string}`,
+        address: tokenAddr as `0x${string}`,
         abi: erc20Abi,
         functionName: 'allowance',
         args: [addr as `0x${string}`, contract as `0x${string}`],
       })
-      set({ needsApproval: BigInt(allowance as bigint) < BigInt(String(amount)) })
+      set({ needsApproval: BigInt(allowance as bigint) < want })
     } catch {
-      set({ needsApproval: false })
+      set({ needsApproval: false, needsWrap: false })
     }
   },
 

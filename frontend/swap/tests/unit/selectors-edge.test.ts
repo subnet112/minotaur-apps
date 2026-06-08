@@ -42,6 +42,8 @@ function baseState(): any {
     activeOrder: null,
     needsApproval: false,
     approving: false,
+    needsWrap: false,
+    wrapping: false,
     loading: false,
     submitting: false,
   }

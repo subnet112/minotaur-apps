@@ -26,6 +26,8 @@ interface SelectableState {
   activeOrder: { status: string } | null
   needsApproval: boolean
   approving: boolean
+  needsWrap: boolean
+  wrapping: boolean
   loading: boolean
   submitting: boolean
   bittensorProxySetup: boolean
@@ -60,10 +62,15 @@ export function selectActionState(s: SelectableState): ActionState {
   if (s.loading) return 'fetching'
   if (!s.quote) return 'no-route'
 
+  if (s.wrapping) return 'wrapping'
   if (s.approving) return 'approving'
-  // Approval CTA now lives on the swap button itself — when an ERC-20
-  // allowance is needed, the button transitions to 'approve' (lime,
-  // clickable, label "Approve <token>"); the SwapForm renders a short
+  // Native ETH settles as WETH (the relayer can't attach msg.value): the
+  // button walks Wrap → Approve → Sign. Wrap is gated first — no WETH to
+  // approve until it's wrapped.
+  if (s.needsWrap) return 'wrap'
+  // Approval CTA lives on the swap button itself — when an ERC-20 (or, post-
+  // wrap, WETH) allowance is needed, the button transitions to 'approve'
+  // (lime, clickable, label "Approve <token>"); the SwapForm renders a short
   // help line directly beneath it. WalletModeBlock no longer owns this.
   if (s.needsApproval) return 'approve'
 
