@@ -425,6 +425,7 @@ export default function SwapForm(props: SwapFormProps) {
           forceLabel={props.forceActionLabel}
           forceDisabled={
             !props.acknowledged && (
+              props.actionState === 'wrap' ||
               props.actionState === 'approve' ||
               props.actionState === 'swap-ready' ||
               props.actionState === 'sign-broadcast'
