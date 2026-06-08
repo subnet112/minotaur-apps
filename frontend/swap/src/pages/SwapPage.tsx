@@ -36,6 +36,7 @@ import { useQuoteExpiry } from '@/hooks/useQuoteExpiry'
 import { useOrderSubmission } from '@/hooks/useOrderSubmission'
 import { useComparisonQuotes } from '@/hooks/useComparisonQuotes'
 import { useApproval } from '@/hooks/useApproval'
+import { useWrap } from '@/hooks/useWrap'
 
 import AppPageHeader from '@/components/dex-aggregator/AppPageHeader'
 import AppWalletButton from '@/components/dex-aggregator/AppWalletButton'
@@ -109,6 +110,8 @@ export default function SwapPage() {
   const externalQuotes = useComparisonQuotes()
   // ERC-20 approval flow: refreshes needsApproval and exposes the approve TX.
   const { approve } = useApproval()
+  // Native-ETH wrap flow: exposes the ETH→WETH deposit TX for the 'wrap' state.
+  const { wrap } = useWrap()
   // Toast surface — used to nudge users who try to swap without ticking the
   // alpha-risk box. The button stays clickable in that state so the toast
   // has a chance to fire and explain why nothing happened.
@@ -254,6 +257,7 @@ export default function SwapPage() {
   // Non-funds states (disconnected / wrong-network) still act in-place
   // because there's nothing to review.
   const isFundsAction =
+    actionState === 'wrap' ||
     actionState === 'approve' ||
     actionState === 'swap-ready' ||
     actionState === 'sign-broadcast'
@@ -291,6 +295,10 @@ export default function SwapPage() {
         message: 'Go back to the form and tick the checkbox to continue.',
       })
       flashDisclaimer()
+      return
+    }
+    if (actionState === 'wrap') {
+      wrap()
       return
     }
     if (actionState === 'approve') {
@@ -345,7 +353,17 @@ export default function SwapPage() {
   // Approve-state explainer copy mirrored across form + review steps so
   // the user sees the same help regardless of where they happen to be.
   const approveHelpText: React.ReactNode = (
-    actionState === 'approving' ? (
+    actionState === 'wrapping' ? (
+      <>
+        Wrap submitted — waiting for the transaction to confirm. You'll approve{' '}
+        <span className="b">WETH</span> next.
+      </>
+    ) : actionState === 'wrap' ? (
+      <>
+        Native ETH settles as <span className="b">WETH</span>: one wrap, then a
+        one-time approval, then the relayer handles the swap gaslessly.
+      </>
+    ) : actionState === 'approving' ? (
       <>
         Approval submitted — waiting for the transaction to confirm. Cancel from
         your wallet to release the slot.
@@ -353,7 +371,7 @@ export default function SwapPage() {
     ) : actionState === 'approve' ? (
       <>
         One-time approval for{' '}
-        <span className="b">{inputToken?.symbol || 'this token'}</span>. Enable{' '}
+        <span className="b">{inputToken?.native ? 'WETH' : (inputToken?.symbol || 'this token')}</span>. Enable{' '}
         <span className="b">Unlimited Approval</span> in settings to skip this on
         future swaps.
       </>
@@ -461,9 +479,13 @@ export default function SwapPage() {
               actionState={actionState}
               onActionClick={handleReviewAction}
               onBack={() => setFlowStep('form')}
-              tokenSymbol={inputToken?.symbol}
+              // Native ETH is approved as WETH post-wrap; the review card only
+              // ever shows approve/wrap/sign labels (never 'insufficient'), so
+              // relabeling to WETH here is safe and accurate.
+              tokenSymbol={inputToken?.native ? 'WETH' : inputToken?.symbol}
               forceDisabled={
                 !accepted && (
+                  actionState === 'wrap' ||
                   actionState === 'approve' ||
                   actionState === 'swap-ready' ||
                   actionState === 'sign-broadcast'

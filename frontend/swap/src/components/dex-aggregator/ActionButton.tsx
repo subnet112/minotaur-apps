@@ -49,6 +49,8 @@ const STATE_CONFIG: Record<ActionState, StateConfig> = {
   insufficient:     { modifier: 'is-insufficient', label: 'Insufficient {token}', disabled: true,  glyph: 'none' },
   fetching:         { modifier: 'is-fetching',     label: 'Fetching quote…',     disabled: true,  glyph: 'spinner' },
   'no-route':       { modifier: 'is-no-route',     label: 'No route found',      disabled: true,  glyph: 'none' },
+  wrap:             { modifier: '',                label: 'Wrap ETH',           disabled: false, glyph: 'arrow' },
+  wrapping:         { modifier: 'is-approving',    label: 'Wrapping ETH…',       disabled: true,  glyph: 'spinner' },
   approve:          { modifier: '',                label: 'Approve {token}',     disabled: false, glyph: 'arrow' },
   approving:        { modifier: 'is-approving',    label: 'Approving {token}…',  disabled: true,  glyph: 'spinner' },
   'swap-ready':     { modifier: '',                label: 'Swap',               disabled: false, glyph: 'arrow' },

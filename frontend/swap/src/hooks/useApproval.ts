@@ -3,6 +3,7 @@ import { useSwapStore } from '../store'
 import { useToast } from '@/components/shell'
 import { useWalletClient, usePublicClient } from 'wagmi'
 import { erc20Abi, type Address } from 'viem'
+import { CHAIN_CONFIG } from '@/config/chains'
 
 /**
  * ERC-20 approval glue:
@@ -47,7 +48,18 @@ export function useApproval() {
       toast.error({ title: 'Approval unavailable', message: 'Connect an EVM wallet to approve.' })
       return
     }
-    if (!store.inputToken || store.inputToken.native) return
+    if (!store.inputToken) return
+    // Native ETH settles as WETH (see useWrap): once wrapped, the user
+    // approves the wrapped-native token, not the 0xEeee… native sentinel.
+    const isNative = !!store.inputToken.native
+    const tokenAddr = (isNative
+      ? CHAIN_CONFIG[store.chainId]?.wrappedNative
+      : store.inputToken.address) as Address | undefined
+    if (!tokenAddr) {
+      toast.error({ title: 'Approval unavailable', message: 'Input token address not resolved yet.' })
+      return
+    }
+    const tokenSymbol = isNative ? 'WETH' : store.inputToken.symbol
     const spender = store.contractAddress as Address
     if (!spender) {
       toast.error({ title: 'App not ready', message: 'Contract address missing — wait for the app to load.' })
@@ -63,14 +75,14 @@ export function useApproval() {
       return
     }
 
-    const toastId = toast.loading({ title: `Approving ${store.inputToken.symbol}…` })
+    const toastId = toast.loading({ title: `Approving ${tokenSymbol}…` })
     store.setApproving(true)
     try {
       // Approve the exact required amount. Users wanting MAX can do it
       // manually; exact-amount approvals are safer and easier to revoke.
-      const amount = BigInt(amountStr)
+      const amount = BigInt(String(amountStr))
       const txHash = await walletClient.writeContract({
-        address: store.inputToken.address as Address,
+        address: tokenAddr,
         abi: erc20Abi,
         functionName: 'approve',
         args: [spender, amount],
@@ -111,7 +123,7 @@ export function useApproval() {
 
       toast.update(toastId, {
         variant: 'success',
-        title: `${store.inputToken.symbol} approved`,
+        title: `${tokenSymbol} approved`,
         message: `Spender ${spender.slice(0, 6)}…${spender.slice(-4)}`,
       })
     } catch (err: any) {

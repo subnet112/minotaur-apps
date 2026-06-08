@@ -26,6 +26,8 @@ function baseState(): any {
     activeOrder: null,
     needsApproval: false,
     approving: false,
+    needsWrap: false,
+    wrapping: false,
     loading: false,
     submitting: false,
   }
@@ -127,6 +129,32 @@ describe('selectActionState', () => {
                 quote: {} as any, inputToken: erc20Token }
     expect(selectActionState(s)).toBe('swap-ready')
   })
+
+  // Native-ETH wrap → approve → sign flow (relayer-funded; msg.value retired).
+  const nativeReady = {
+    walletConnected: true, walletMode: 'external' as const, walletChainId: 1,
+    inputAmount: '10', inputBalance: '100', quote: {} as any, inputToken: nativeToken,
+  }
+
+  it('returns "wrap" for native input that still needs wrapping', () => {
+    const s = { ...baseState(), ...nativeReady, needsWrap: true }
+    expect(selectActionState(s)).toBe('wrap')
+  })
+
+  it('returns "wrapping" while a native wrap is in flight', () => {
+    const s = { ...baseState(), ...nativeReady, needsWrap: true, wrapping: true }
+    expect(selectActionState(s)).toBe('wrapping')
+  })
+
+  it('returns "approve" for native input wrapped but not yet approved', () => {
+    const s = { ...baseState(), ...nativeReady, needsWrap: false, needsApproval: true }
+    expect(selectActionState(s)).toBe('approve')
+  })
+
+  it('returns "swap-ready" for native input once wrapped + approved', () => {
+    const s = { ...baseState(), ...nativeReady, needsWrap: false, needsApproval: false }
+    expect(selectActionState(s)).toBe('swap-ready')
+  })
 })
 
 describe('selectModeBlockVariant', () => {
@@ -153,10 +181,10 @@ describe('selectModeBlockVariant', () => {
     expect(selectModeBlockVariant(s)).toBe('approving')
   })
 
-  it('returns "native-eth" when input token is native', () => {
-    const s = { ...baseState(), walletConnected: true,
-                inputToken: { symbol: 'ETH', address: 'native', decimals: 18, native: true } }
-    expect(selectModeBlockVariant(s)).toBe('native-eth')
+  it('native input no longer drives the mode block (wrap/approve live on the button)', () => {
+    const s = { ...baseState(), walletConnected: true, walletMode: 'external',
+                inputToken: nativeToken, needsWrap: true }
+    expect(selectModeBlockVariant(s)).toBeNull()
   })
 
   it('returns "setup-proxy" for bittensor mode without proxy', () => {
