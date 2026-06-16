@@ -10,7 +10,6 @@
 //   1. Simulation success
 //   2. Output amount vs minAmountOut (primary metric)
 //   3. Gas efficiency
-//   4. Price impact
 // =============================================================================
 
 var config = {
@@ -120,7 +119,7 @@ var manifest = {
       scoring_hints: {
         goal: "Maximize output tokens received relative to minAmountOut",
         primary_metric: "output_ratio (outputAmount / minAmountOut)",
-        secondary_metrics: ["gas_efficiency", "price_impact"],
+        secondary_metrics: ["gas_efficiency"],
       },
     },
   ],
@@ -498,12 +497,8 @@ function score(plan, state, context) {
   // Gas efficiency: penalize high gas usage
   var gasScore = gasUsed > 0 ? Math.max(0, 1 - gasUsed / 1000000) : 0.5;
 
-  // Price impact (if available from simulation)
-  var priceImpact = sim.price_impact || sim.priceImpact || 0;
-  var impactScore = Math.max(0, 1 - Math.abs(priceImpact) * 20);
-
   // Weighted final score
-  var finalScore = outputScore * 0.7 + gasScore * 0.15 + impactScore * 0.15;
+  var finalScore = outputScore * 0.8 + gasScore * 0.2;
   finalScore = Math.max(0, Math.min(1.0, finalScore));
 
   return {
@@ -523,7 +518,6 @@ function score(plan, state, context) {
       output_ratio: outputRatio,
       gas_score: gasScore,
       gas_used: gasUsed,
-      impact_score: impactScore,
       num_transfers: transfers.length,
     },
     metadata: {
