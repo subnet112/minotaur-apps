@@ -286,11 +286,29 @@ contract DexAggregatorApp is AppIntentBase {
         }
         if (fee > 0) IERC20(tokenOut).safeTransfer(feeCollector, fee);
 
-        // 5. Score: 5000 at minAmountOut, linear to 10000 at 2x
-        score = _scoreLinear(gained, minAmountOut);
+        // 5. Score against the off-chain QUOTE (the honest promise), not the
+        //    slippage-guard min. Anchoring on quotedOutput keeps the score
+        //    meaningful (≈5000 when execution ≈ quote, >5000 only for genuine
+        //    improvement, scaled down below) instead of saturating at 10000
+        //    whenever the min is loose. Mirrors the CoW fee, which already keys
+        //    off quotedOutput. Falls back to minAmountOut when no quote supplied.
+        score = _scoreVsQuote(gained, quotedOutput > 0 ? quotedOutput : minAmountOut);
         valid = true;
 
         emit SwapExecuted(order.orderId, order.submittedBy, tokenIn, tokenOut, amountIn, gained, fee);
+    }
+
+    /// @notice Score execution against an anchor (the quoted output): 5000 at the
+    ///         anchor, ramped to 10000 at 2x above, and ramped down to 0 below.
+    ///         Unlike _scoreLinear (which floors at 0 below the anchor — safe only
+    ///         when gained >= anchor is guaranteed), this grades the below-anchor
+    ///         region so an honest execution landing just under the gross quote
+    ///         isn't scored 0.
+    function _scoreVsQuote(uint256 gained, uint256 anchor) private pure returns (uint256) {
+        if (anchor == 0) return 0;
+        if (gained >= anchor * 2) return 10000;
+        if (gained >= anchor) return 5000 + ((gained - anchor) * 5000) / anchor;
+        return (gained * 5000) / anchor;
     }
 
     // ── Bridge intent ─────────────────────────────────────────────────────────
