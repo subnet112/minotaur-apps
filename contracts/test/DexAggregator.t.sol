@@ -545,6 +545,57 @@ contract DexAggregatorTest is Test {
         assertEq(usdc.balanceOf(userAddr), 2140e6, "user gets gained - app fee");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //   SCORE ANCHORED ON THE QUOTE (quotedOutput), not the slippage-guard min
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @dev Runs a swap that delivers `rate * 1e6` USDC against `quoted`, with a
+    ///      tiny min so validity is never the gate, and returns the score.
+    function _scoreForQuote(uint256 rate, uint256 quoted) internal returns (uint256) {
+        uint256 amountIn = 1e18;
+        uint256 minOut = 100e6; // tiny → always valid, isolates the score curve
+        dex.setRate(rate);
+        weth.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        weth.approve(address(app), amountIn);
+        (IAppIntentBase.IntentOrder memory order, IAppIntentBase.ExecutionPlan memory plan) =
+            _buildSwapWithQuote(
+                keccak256(abi.encode("score_quote", rate, quoted)),
+                amountIn, minOut, userAddr, app, quoted
+            );
+        vm.prank(relayerAddr);
+        (uint256 score, bool valid) = app.scoreIntent(order, plan);
+        assertTrue(valid, "should be valid (min is tiny)");
+        return score;
+    }
+
+    function test_score_atQuote_is5000() public {
+        // Execution exactly meets the quote → 5000 (NOT saturated at 10000).
+        assertEq(_scoreForQuote(2000, 2000e6), 5000, "score == 5000 when gained == quote");
+    }
+
+    function test_score_atTwiceQuote_is10000() public {
+        assertEq(_scoreForQuote(2000, 1000e6), 10000, "score == 10000 when gained == 2x quote");
+    }
+
+    function test_score_belowQuote_rampsDown_notCliff() public {
+        // gained = 0.5x quote → ramp to 2500, NOT the old hard-0 cliff. This is
+        // the case an honest market execution hits (delivers just under the gross
+        // quote): it must score proportionally, not 0.
+        assertEq(_scoreForQuote(1000, 2000e6), 2500, "score ramps to 2500 at half the quote");
+    }
+
+    function test_score_aboveQuote_isMeaningful() public {
+        // gained = 2160 vs quote 2000 → 5000 + (160/2000)*5000 = 5400.
+        assertEq(_scoreForQuote(2160, 2000e6), 5400, "score 5400 for 8% over quote");
+    }
+
+    function test_score_fallsBackToMinWhenNoQuote() public {
+        // quotedOutput == 0 → anchor on minAmountOut (legacy behavior preserved):
+        // gained 2000e6 >= 2x min(100e6) → 10000.
+        assertEq(_scoreForQuote(2000, 0), 10000, "no quote => anchors on min (legacy)");
+    }
+
     function test_swap_noFeeWhenZeroFeeBps() public {
         // Deploy app with 0% positive-slippage fee
         DexAggregatorApp noFeeApp = new DexAggregatorApp(
