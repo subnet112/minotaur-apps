@@ -8,7 +8,8 @@
 //
 // Scores DEX swap execution quality. Evaluates:
 //   1. Simulation success
-//   2. Output amount vs minAmountOut (primary metric)
+//   2. Output amount vs the QUOTE (quotedOutput) — primary metric. The min is
+//      only the execution slippage guard, NOT the scoring anchor.
 //   3. Gas efficiency
 // =============================================================================
 
@@ -117,8 +118,8 @@ var manifest = {
         unwrap_output: false,
       },
       scoring_hints: {
-        goal: "Maximize output tokens received relative to minAmountOut",
-        primary_metric: "output_ratio (outputAmount / minAmountOut)",
+        goal: "Maximize output tokens received relative to the quote (quotedOutput)",
+        primary_metric: "output_ratio (outputAmount / quotedOutput); 1.0 = met the quote, >1.0 = beat it",
         secondary_metrics: ["gas_efficiency"],
       },
     },
@@ -471,14 +472,12 @@ function score(plan, state, context) {
     };
   }
 
-  // 4. Calculate output ratio
+  // 4. Execution validity: the swap must meet the slippage-guard min if one is
+  //    set. (A swap that reverted on-chain would have no transfers; this is a
+  //    defensive re-check.) min is ONLY the execution guard now — NOT the
+  //    scoring anchor.
   var minOut = parseFloat(minAmountOut);
-  if (minOut <= 0) {
-    return { score: 0, valid: false, reason: "Invalid minAmountOut" };
-  }
-
-  var outputRatio = outputAmount / minOut;
-  if (outputRatio < 1.0) {
+  if (minOut > 0 && outputAmount < minOut) {
     return {
       score: 0,
       valid: false,
@@ -491,8 +490,28 @@ function score(plan, state, context) {
   }
 
   // 5. Score components
-  // Output quality: 0.5 at exactly minAmountOut, linear to 1.0 at 2x min
-  var outputScore = Math.min(1.0, 0.5 + (outputRatio - 1.0) * 0.5);
+  // Output quality anchored on the QUOTE (the honest promise we showed the
+  // user), NOT the slippage-guard min. 0.5 at exactly the quote, ramped up to
+  // 1.0 at 2x above and DOWN to 0 below — so an honest market execution (which
+  // lands ~at the quote) scores ~0.5 instead of saturating, and only genuine
+  // improvement over the quote scores >0.5. Mirrors the on-chain _scoreVsQuote
+  // curve. Falls back to the min when no quote was supplied (quotedOutput == 0).
+  var quotedOutput = params.quoted_output || params.quotedOutput || "0";
+  var quoted = parseFloat(quotedOutput);
+  var anchor = quoted > 0 ? quoted : minOut;
+  if (anchor <= 0) {
+    return { score: 0, valid: false, reason: "No quote or min to score against" };
+  }
+
+  var outputRatio = outputAmount / anchor;
+  var outputScore;
+  if (outputRatio >= 2.0) {
+    outputScore = 1.0;
+  } else if (outputRatio >= 1.0) {
+    outputScore = 0.5 + (outputRatio - 1.0) * 0.5;
+  } else {
+    outputScore = outputRatio * 0.5; // ramp 0 -> 0.5 below the quote
+  }
 
   // Gas efficiency: penalize high gas usage
   var gasScore = gasUsed > 0 ? Math.max(0, 1 - gasUsed / 1000000) : 0.5;
@@ -507,8 +526,8 @@ function score(plan, state, context) {
     reason:
       "Swap OK: output=" +
       outputAmount.toFixed(0) +
-      " min=" +
-      minOut.toFixed(0) +
+      " quote=" +
+      anchor.toFixed(0) +
       " ratio=" +
       outputRatio.toFixed(4) +
       " gas=" +
@@ -523,7 +542,8 @@ function score(plan, state, context) {
     metadata: {
       output_amount: outputAmount,
       min_amount_out: minOut,
-      surplus: outputAmount - minOut,
+      quoted_output: quoted,
+      surplus_over_quote: outputAmount - anchor,
     },
   };
 }
