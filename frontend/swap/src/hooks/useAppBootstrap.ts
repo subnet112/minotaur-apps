@@ -14,8 +14,8 @@ export function useAppBootstrap() {
   useEffect(() => {
     store.loadHistory()
 
-    // Fetch solver tokens for the current chain
-    console.log('[swap] fetching solver tokens for chain', store.chainId)
+    // Fetch the token catalog (Superchain Token List) for the current chain
+    console.log('[swap] fetching token list for chain', store.chainId)
     api.getChainTokens(store.chainId).then((res) => {
       const solverTokens: Token[] = res.tokens.map((t) => ({
         symbol: t.symbol,
@@ -25,17 +25,17 @@ export function useAppBootstrap() {
         icon: t.symbol === 'WETH' || t.symbol === 'ETH' ? '\u27E0' : t.symbol === 'USDC' || t.symbol === 'USDT' || t.symbol === 'DAI' ? '$' : t.symbol[0],
       }))
 
-      // Solver only discovers ERC-20s from Uniswap V3 pools. Inject the
-      // native token (ETH/TAO) from the hardcoded config so users can
-      // swap native assets seamlessly — the contract wraps msg.value
-      // internally via _fundAndExecute.
+      // The token list contains only ERC-20s. Inject the native token
+      // (ETH/TAO) from the hardcoded config so users can swap native assets
+      // seamlessly — the contract wraps msg.value internally via
+      // _fundAndExecute.
       const hardcoded = TOKENS[store.chainId] || []
       const nativeToken = hardcoded.find((t) => t.native)
       const tokens = nativeToken && !solverTokens.some((t) => t.native || t.address === nativeToken.address)
         ? [nativeToken, ...solverTokens]
         : solverTokens
 
-      console.log(`[swap] solver tokens loaded for chain ${store.chainId}:`, tokens.length, tokens.map(t => t.symbol))
+      console.log(`[swap] token list loaded for chain ${store.chainId}:`, tokens.length, tokens.map(t => t.symbol))
       store.setSolverTokens(store.chainId, tokens)
 
       // Update selected tokens to matching solver token objects (preserves
