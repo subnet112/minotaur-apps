@@ -546,7 +546,8 @@ contract DexAggregatorTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //   SCORE ANCHORED ON THE QUOTE (quotedOutput), not the slippage-guard min
+    //   SCORE CURVE: 5000 at the slippage floor (min), PAR (7500) at the quote,
+    //   asymptotic toward (never reaching) 10000 for positive slippage
     // ═══════════════════════════════════════════════════════════════════════
 
     /// @dev Runs a swap that delivers `rate * 1e6` USDC against `quoted`, with a
@@ -569,31 +570,40 @@ contract DexAggregatorTest is Test {
         return score;
     }
 
-    function test_score_atQuote_is5000() public {
-        // Execution exactly meets the quote → 5000 (NOT saturated at 10000).
-        assertEq(_scoreForQuote(2000, 2000e6), 5000, "score == 5000 when gained == quote");
+    function test_score_atQuote_isPar() public {
+        // Execution exactly meets the quote → PAR_SCORE (7500): clearly passing,
+        // with headroom reserved above for positive slippage. Not saturated.
+        assertEq(_scoreForQuote(2000, 2000e6), 7500, "score == 7500 (PAR) when gained == quote");
     }
 
-    function test_score_atTwiceQuote_is10000() public {
-        assertEq(_scoreForQuote(2000, 1000e6), 10000, "score == 10000 when gained == 2x quote");
+    function test_score_neverReaches10000() public {
+        // 2x the quote no longer saturates — the curve is asymptotic, so there is
+        // always headroom to improve. At 2x quote: 10000 - 2500*(quote/gained) = 8750.
+        uint256 s = _scoreForQuote(2000, 1000e6);
+        assertEq(s, 8750, "score == 8750 at 2x quote (asymptotic, not 10000)");
+        assertLt(s, 10000, "score must never reach 10000");
     }
 
-    function test_score_belowQuote_rampsDown_notCliff() public {
-        // gained = 0.5x quote → ramp to 2500, NOT the old hard-0 cliff. This is
-        // the case an honest market execution hits (delivers just under the gross
-        // quote): it must score proportionally, not 0.
-        assertEq(_scoreForQuote(1000, 2000e6), 2500, "score ramps to 2500 at half the quote");
+    function test_score_withinSlippage_passes() public {
+        // THE FIX: a fill below the quote but well within the slippage floor
+        // (gained 1000e6 >> the tiny 100e6 min) must PASS (>= 5000), ramping
+        // within the band toward PAR at the quote. The old quote-anchored curve
+        // scored this 2500 → false-rejected a perfectly good in-slippage fill.
+        uint256 s = _scoreForQuote(1000, 2000e6);
+        assertEq(s, 6184, "within-slippage fill scores in the passing band");
+        assertGe(s, 5000, "any fill within slippage must pass");
     }
 
     function test_score_aboveQuote_isMeaningful() public {
-        // gained = 2160 vs quote 2000 → 5000 + (160/2000)*5000 = 5400.
-        assertEq(_scoreForQuote(2160, 2000e6), 5400, "score 5400 for 8% over quote");
+        // gained = 2160 vs quote 2000 (8% positive slippage) → asymptotic:
+        // 10000 - 2500*(2000/2160) = 7686. Above PAR (7500), below 10000.
+        assertEq(_scoreForQuote(2160, 2000e6), 7686, "score 7686 for 8% over quote");
     }
 
     function test_score_fallsBackToMinWhenNoQuote() public {
-        // quotedOutput == 0 → anchor on minAmountOut (legacy behavior preserved):
-        // gained 2000e6 >= 2x min(100e6) → 10000.
-        assertEq(_scoreForQuote(2000, 0), 10000, "no quote => anchors on min (legacy)");
+        // quotedOutput == 0 → min-anchored asymptote (5000 at min, never 10000):
+        // gained 2000e6 vs min 100e6 → 10000 - 5000*(100/2000) = 9750.
+        assertEq(_scoreForQuote(2000, 0), 9750, "no quote => min-anchored asymptote");
     }
 
     function test_swap_noFeeWhenZeroFeeBps() public {
@@ -783,8 +793,10 @@ contract DexAggregatorTest is Test {
         assertEq(weth.balanceOf(userAddr), 0.5e18, "User gets remaining WETH back");
     }
 
-    function test_swap_maxScore() public {
-        // Give user 3600+ USDC (>= 2x minAmountOut) → max score
+    function test_swap_scoreAsymptotic_neverMax() public {
+        // 2x the min output (no quote → min-anchored asymptote): the score is
+        // 10000 - 5000*(min/gained) = 7500, NOT a saturated 10000. The curve
+        // never reaches 10000, so there is always headroom for a better fill.
         dex.setRate(3600); // 2x rate
 
         uint256 amountIn = 1e18;
@@ -801,7 +813,8 @@ contract DexAggregatorTest is Test {
         (uint256 score, bool valid) = app.scoreIntent(order, plan);
 
         assertTrue(valid);
-        assertEq(score, 10000, "Max score at 2x min output");
+        assertEq(score, 7500, "2x min (no quote) => 7500 on the asymptote");
+        assertLt(score, 10000, "score never reaches 10000");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
