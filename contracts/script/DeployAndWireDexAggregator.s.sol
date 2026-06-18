@@ -53,7 +53,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///
 /// Output (parseable): DEX_AGGREGATOR=0x...
 contract DeployAndWireDexAggregator is Script {
-    function run() external {
+    /// @return the deployed, wired, and verified DexAggregatorApp address.
+    function run() external returns (address) {
         // ── Inputs ──────────────────────────────────────────────────────────
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address validatorRegistry = vm.envAddress("VALIDATOR_REGISTRY");
@@ -173,6 +174,8 @@ contract DeployAndWireDexAggregator is Script {
         }
         console.log("");
         console.log("OFF-CHAIN NEXT: point the platform deployment record at the");
-        console.log("address above (see redeploy-dex.sh) so orders route here.");
+        console.log("address above (see REDEPLOY.md) so orders route here.");
+
+        return address(app);
     }
 }
