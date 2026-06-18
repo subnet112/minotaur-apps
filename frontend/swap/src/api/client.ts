@@ -58,24 +58,33 @@ export function getChains(): Promise<{ chains: ChainInfo[] }> {
 
 // ── Token catalog (external, keyless) ─────────────────────────────────────────
 //
-// The swap token selector is sourced from the Superchain Token List — a static,
-// keyless CDN JSON in the Token Lists standard — NOT from the validator. The
-// platform no longer does token discovery: the solver routes any token with a
-// Uniswap V3 / Aerodrome pool on-chain, so any token on this list is assumed
-// routable and the live quote is the real check. Tokens not on the list can
-// still be added by pasting their address (see SwapPage custom-token import).
+// The swap token selector is sourced from keyless token lists, NOT the
+// validator. The platform no longer does token discovery: the solver routes
+// any token with a Uniswap V3 / Aerodrome pool on-chain, so any token on these
+// lists is assumed routable and the live quote is the real check. Tokens not on
+// the lists can still be added by pasting their address (SwapPage custom import).
+//
+// Two sources, merged:
+//   • Superchain Token List — static CDN JSON (Token Lists standard), covers
+//     all supported chains; the required backbone.
+//   • Aerodrome /api/v1/assets — Aerodrome's own Base token list (the
+//     velodrome-finance/api stack), best-effort, adds the Aero-native long
+//     tail. Base-only; never blocks the catalog if it's unreachable.
 
 export const TOKEN_LIST_URL = 'https://static.optimism.io/optimism.tokenlist.json'
+export const AERODROME_ASSETS_URL = 'https://api.aerodrome.finance/api/v1/assets'
+
+const BASE_CHAIN_ID = 8453
 
 export interface SolverToken {
   address: string
   symbol: string
   decimals: number
   logoURI?: string
-  pool_count?: number  // retained for shape compat; not populated from the list
+  pool_count?: number  // retained for shape compat; not populated from the lists
 }
 
-/** A single entry in a Token Lists standard document. */
+/** A single entry in a Token Lists standard document (Superchain list). */
 interface TokenListEntry {
   chainId: number
   address: string
@@ -85,31 +94,79 @@ interface TokenListEntry {
   logoURI?: string
 }
 
-/**
- * Fetch the token catalog for a chain from the Superchain Token List.
- *
- * Returns the same shape the old validator `/v1/chains/{id}/tokens` endpoint
- * did, so callers (useAppBootstrap) are unchanged. Throws on network/parse
- * failure so the caller can fall back to the hardcoded TOKENS config.
- */
-export async function getChainTokens(
-  chainId: number,
-): Promise<{ chain_id: number; tokens: SolverToken[]; count: number }> {
+/** A token in Aerodrome's /api/v1/assets response ({ data: [...] }). */
+interface AerodromeAsset {
+  address: string
+  symbol: string
+  decimals: number
+  logoURI?: string
+}
+
+/** De-duplicate by lower-cased address, keeping the first occurrence. */
+function dedupeByAddress(tokens: SolverToken[]): SolverToken[] {
+  const seen = new Set<string>()
+  const out: SolverToken[] = []
+  for (const t of tokens) {
+    if (!t.address) continue
+    const key = t.address.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(t)
+  }
+  return out
+}
+
+/** Superchain Token List entries for a chain. Throws on network/parse failure. */
+async function fetchSuperchainTokens(chainId: number): Promise<SolverToken[]> {
   const res = await fetch(TOKEN_LIST_URL, { headers: { Accept: 'application/json' } })
   if (!res.ok) {
     throw new ApiError(res.status, `Token list fetch failed: ${res.statusText}`)
   }
   const data = (await res.json()) as { tokens?: TokenListEntry[] }
   const list = Array.isArray(data.tokens) ? data.tokens : []
-  const seen = new Set<string>()
-  const tokens: SolverToken[] = []
-  for (const t of list) {
-    if (t.chainId !== chainId || !t.address) continue
-    const key = t.address.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    tokens.push({ address: t.address, symbol: t.symbol, decimals: t.decimals, logoURI: t.logoURI })
+  return list
+    .filter((t) => t.chainId === chainId && !!t.address)
+    .map((t) => ({ address: t.address, symbol: t.symbol, decimals: t.decimals, logoURI: t.logoURI }))
+}
+
+/** Aerodrome's keyless Base token list. Throws on failure (caller best-efforts). */
+async function fetchAerodromeTokens(): Promise<SolverToken[]> {
+  const res = await fetch(AERODROME_ASSETS_URL, { headers: { Accept: 'application/json' } })
+  if (!res.ok) {
+    throw new ApiError(res.status, `Aerodrome assets fetch failed: ${res.statusText}`)
   }
+  const data = (await res.json()) as { data?: AerodromeAsset[] }
+  const list = Array.isArray(data.data) ? data.data : []
+  return list
+    .filter((t) => !!t.address)
+    .map((t) => ({ address: t.address, symbol: t.symbol, decimals: t.decimals, logoURI: t.logoURI }))
+}
+
+/**
+ * Fetch the token catalog for a chain. Returns the same shape the old validator
+ * `/v1/chains/{id}/tokens` endpoint did, so callers (useAppBootstrap) are
+ * unchanged. Throws only if the Superchain backbone fails, so the caller can
+ * fall back to the hardcoded TOKENS config.
+ */
+export async function getChainTokens(
+  chainId: number,
+): Promise<{ chain_id: number; tokens: SolverToken[]; count: number }> {
+  const superchain = dedupeByAddress(await fetchSuperchainTokens(chainId))
+  let tokens = superchain
+
+  // Aerodrome is Base-only — merge its list for the Aero-native long tail.
+  // Best-effort: on any failure (down / CORS / parse) keep the Superchain list
+  // so the selector never breaks on the secondary source.
+  if (chainId === BASE_CHAIN_ID) {
+    try {
+      const aero = await fetchAerodromeTokens()
+      // Superchain entries win on overlap (curated metadata + checksummed addr).
+      tokens = dedupeByAddress([...superchain, ...aero])
+    } catch (err) {
+      console.warn('[swap] Aerodrome token list unavailable, using Superchain only:', err)
+    }
+  }
+
   return { chain_id: chainId, tokens, count: tokens.length }
 }
 
