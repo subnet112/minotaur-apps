@@ -1,8 +1,10 @@
 /**
  * Minotaur API client.
  *
- * All methods hit the Vite dev proxy at /api which forwards to VITE_API_URL.
+ * Most methods hit the Vite dev proxy at /api which forwards to VITE_API_URL.
  * In production, configure the reverse proxy or set the base URL directly.
+ * Exception: getChainTokens fetches the external Superchain Token List CDN
+ * directly (keyless) — see its doc below.
  */
 
 import { DEFAULT_CHAIN_ID } from '@/config/chains'
@@ -54,15 +56,61 @@ export function getChains(): Promise<{ chains: ChainInfo[] }> {
   return request('/v1/chains')
 }
 
+// ── Token catalog (external, keyless) ─────────────────────────────────────────
+//
+// The swap token selector is sourced from the Superchain Token List — a static,
+// keyless CDN JSON in the Token Lists standard — NOT from the validator. The
+// platform no longer does token discovery: the solver routes any token with a
+// Uniswap V3 / Aerodrome pool on-chain, so any token on this list is assumed
+// routable and the live quote is the real check. Tokens not on the list can
+// still be added by pasting their address (see SwapPage custom-token import).
+
+export const TOKEN_LIST_URL = 'https://static.optimism.io/optimism.tokenlist.json'
+
 export interface SolverToken {
   address: string
   symbol: string
   decimals: number
-  pool_count: number
+  logoURI?: string
+  pool_count?: number  // retained for shape compat; not populated from the list
 }
 
-export function getChainTokens(chainId: number): Promise<{ chain_id: number; tokens: SolverToken[]; count: number }> {
-  return request(`/v1/chains/${chainId}/tokens`)
+/** A single entry in a Token Lists standard document. */
+interface TokenListEntry {
+  chainId: number
+  address: string
+  name: string
+  symbol: string
+  decimals: number
+  logoURI?: string
+}
+
+/**
+ * Fetch the token catalog for a chain from the Superchain Token List.
+ *
+ * Returns the same shape the old validator `/v1/chains/{id}/tokens` endpoint
+ * did, so callers (useAppBootstrap) are unchanged. Throws on network/parse
+ * failure so the caller can fall back to the hardcoded TOKENS config.
+ */
+export async function getChainTokens(
+  chainId: number,
+): Promise<{ chain_id: number; tokens: SolverToken[]; count: number }> {
+  const res = await fetch(TOKEN_LIST_URL, { headers: { Accept: 'application/json' } })
+  if (!res.ok) {
+    throw new ApiError(res.status, `Token list fetch failed: ${res.statusText}`)
+  }
+  const data = (await res.json()) as { tokens?: TokenListEntry[] }
+  const list = Array.isArray(data.tokens) ? data.tokens : []
+  const seen = new Set<string>()
+  const tokens: SolverToken[] = []
+  for (const t of list) {
+    if (t.chainId !== chainId || !t.address) continue
+    const key = t.address.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    tokens.push({ address: t.address, symbol: t.symbol, decimals: t.decimals, logoURI: t.logoURI })
+  }
+  return { chain_id: chainId, tokens, count: tokens.length }
 }
 
 // ── Apps ─────────────────────────────────────────────────────────────────────
