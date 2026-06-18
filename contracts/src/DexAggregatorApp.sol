@@ -286,29 +286,52 @@ contract DexAggregatorApp is AppIntentBase {
         }
         if (fee > 0) IERC20(tokenOut).safeTransfer(feeCollector, fee);
 
-        // 5. Score against the off-chain QUOTE (the honest promise), not the
-        //    slippage-guard min. Anchoring on quotedOutput keeps the score
-        //    meaningful (≈5000 when execution ≈ quote, >5000 only for genuine
-        //    improvement, scaled down below) instead of saturating at 10000
-        //    whenever the min is loose. Mirrors the CoW fee, which already keys
-        //    off quotedOutput. Falls back to minAmountOut when no quote supplied.
-        score = _scoreVsQuote(gained, quotedOutput > 0 ? quotedOutput : minAmountOut);
+        // 5. Score the swap on a curve anchored to the user's OWN bounds: a fill
+        //    at the slippage floor (minAmountOut) scores exactly 5000, so ANY
+        //    fill within the slippage the user signed passes the threshold;
+        //    hitting the quoted output scores PAR_SCORE; positive slippage above
+        //    the quote ramps asymptotically toward (never reaching) 10000. This
+        //    stops rejecting honest fills that land within slippage but a hair
+        //    under the quote — normal market drift on volatile pairs (e.g. ETH).
+        score = _scoreSwap(gained, minAmountOut, quotedOutput);
         valid = true;
 
         emit SwapExecuted(order.orderId, order.submittedBy, tokenIn, tokenOut, amountIn, gained, fee);
     }
 
-    /// @notice Score execution against an anchor (the quoted output): 5000 at the
-    ///         anchor, ramped to 10000 at 2x above, and ramped down to 0 below.
-    ///         Unlike _scoreLinear (which floors at 0 below the anchor — safe only
-    ///         when gained >= anchor is guaranteed), this grades the below-anchor
-    ///         region so an honest execution landing just under the gross quote
-    ///         isn't scored 0.
-    function _scoreVsQuote(uint256 gained, uint256 anchor) private pure returns (uint256) {
-        if (anchor == 0) return 0;
-        if (gained >= anchor * 2) return 10000;
-        if (gained >= anchor) return 5000 + ((gained - anchor) * 5000) / anchor;
-        return (gained * 5000) / anchor;
+    /// @notice Score when execution lands exactly at the quoted output. The
+    ///         slippage band sits below this (down to 5000 at minAmountOut);
+    ///         positive slippage sits above it (asymptotic toward 10000).
+    uint256 private constant PAR_SCORE = 7500;
+
+    /// @notice Score a swap on a curve anchored to the user's own bounds:
+    ///           gained == minAmountOut → 5000       (slippage floor the user
+    ///                                                 signed; == the pass
+    ///                                                 threshold, so any fill
+    ///                                                 within slippage passes)
+    ///           gained == quotedOutput → PAR_SCORE  (delivered what we quoted)
+    ///           gained  > quotedOutput → ramps asymptotically toward, but never
+    ///                                    reaching, 10000 (positive slippage —
+    ///                                    always headroom for a better fill)
+    ///         Below minAmountOut the swap is invalid (rejected in _swap) and
+    ///         never reaches here. Falls back to a min-anchored asymptote when no
+    ///         quote is supplied (quote == 0 or quote <= min).
+    function _scoreSwap(
+        uint256 gained,
+        uint256 minOut,
+        uint256 quote
+    ) private pure returns (uint256) {
+        if (gained <= minOut) return 5000; // at the floor; below is rejected upstream
+        if (quote > minOut && gained <= quote) {
+            // slippage band: minOut → 5000 .. quote → PAR_SCORE (linear)
+            return 5000 + ((gained - minOut) * (PAR_SCORE - 5000)) / (quote - minOut);
+        }
+        // positive slippage (or no usable quote): asymptotic toward 10000, never =
+        uint256 par      = quote > minOut ? quote : minOut;
+        uint256 parScore = quote > minOut ? PAR_SCORE : 5000;
+        uint256 decay = ((10000 - parScore) * par) / gained; // <= 10000 - parScore
+        if (decay == 0) decay = 1; // strict ceiling: score stays below 10000
+        return 10000 - decay;
     }
 
     // ── Bridge intent ─────────────────────────────────────────────────────────
