@@ -103,18 +103,20 @@ var manifest = {
           in_signature: false,
         },
       },
+      // Provide ONLY the params the user/system supplies. Do NOT include
+      // source:"quote" params (min_output_amount, platform_fee_wei,
+      // quoted_output) — the validator computes those from a live quote and
+      // injects them before execution. Hardcoding them makes the example go
+      // stale and teaches the wrong pattern.
       example_params: {
         input_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
         output_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
         input_amount: "1000000000000000000",
-        min_output_amount: "1800000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0",
         permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
         permit_s: "0x0000000000000000000000000000000000000000000000000000000000000000",
-        platform_fee_wei: "0",
-        quoted_output: "1850000000",
         unwrap_output: false,
       },
       scoring_hints: {
@@ -127,6 +129,15 @@ var manifest = {
   // Benchmark scenarios are chain-aware. Each scenario has an optional
   // "chains" field: if present, the scenario only runs on those chain IDs.
   // If absent, it runs on all chains (backward compat).
+  //
+  // A scenario provides only the TRADE INPUTS (tokens, amount, fund). Do NOT
+  // hardcode quote-sourced params here — above, min_output_amount declares
+  // source:"quote" (quote_field "suggested_min_output"), so the validator
+  // computes it from a live quote at benchmark time and injects it before
+  // execution. A hardcoded min_output_amount goes stale as prices move: e.g. a
+  // min set when WETH was ~$2000 reverts EVERY solver with "Too little
+  // received" once WETH trades below that, and corrupts scoring (which is
+  // anchored on the quote, not the min). Let the quote supply the rest.
   benchmark_scenarios: [
     // ── Ethereum mainnet (chain 1) ──────────────────────────────────
     {
@@ -141,7 +152,6 @@ var manifest = {
         input_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
         output_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
         input_amount: "1000000000000000000",
-        min_output_amount: "1800000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -160,7 +170,6 @@ var manifest = {
         input_token: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
         output_token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
         input_amount: "10000000",
-        min_output_amount: "4000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -179,7 +188,6 @@ var manifest = {
         input_token: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
         output_token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
         input_amount: "10000000",
-        min_output_amount: "2300000000000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -200,7 +208,6 @@ var manifest = {
         input_token: "0x4200000000000000000000000000000000000006",
         output_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         input_amount: "500000000000000",
-        min_output_amount: "1000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -219,7 +226,6 @@ var manifest = {
         input_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         output_token: "0x4200000000000000000000000000000000000006",
         input_amount: "2000000",
-        min_output_amount: "500000000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -239,7 +245,6 @@ var manifest = {
         input_token: "0x4200000000000000000000000000000000000006",
         output_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         input_amount: "100000000000000000",
-        min_output_amount: "200000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -258,7 +263,6 @@ var manifest = {
         input_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         output_token: "0x4200000000000000000000000000000000000006",
         input_amount: "250000000",
-        min_output_amount: "80000000000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -278,7 +282,6 @@ var manifest = {
         input_token: "0x4200000000000000000000000000000000000006",
         output_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         input_amount: "1000000000000000000",
-        min_output_amount: "2000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -297,7 +300,6 @@ var manifest = {
         input_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         output_token: "0x4200000000000000000000000000000000000006",
         input_amount: "2500000000",
-        min_output_amount: "800000000000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -317,7 +319,6 @@ var manifest = {
         input_token: "0x4200000000000000000000000000000000000006",
         output_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         input_amount: "5000000000000000000",
-        min_output_amount: "10000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -336,7 +337,6 @@ var manifest = {
         input_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         output_token: "0x4200000000000000000000000000000000000006",
         input_amount: "10000000000",
-        min_output_amount: "3500000000000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -356,7 +356,6 @@ var manifest = {
         input_token: "0x4200000000000000000000000000000000000006",
         output_token: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
         input_amount: "500000000000000000",
-        min_output_amount: "1000000000000000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -375,7 +374,6 @@ var manifest = {
         input_token: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
         output_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         input_amount: "1000000000000000000000",
-        min_output_amount: "950000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -395,7 +393,6 @@ var manifest = {
         input_token: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
         output_token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         input_amount: "1000000",
-        min_output_amount: "500000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -414,7 +411,6 @@ var manifest = {
         input_token: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
         output_token: "0x4200000000000000000000000000000000000006",
         input_amount: "1000000",
-        min_output_amount: "300000000000000000",
         receiver: "0x0000000000000000000000000000000000000001",
         permit_deadline: "0", permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
