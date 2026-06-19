@@ -27,6 +27,7 @@ export interface Token {
   decimals: number
   icon: string
   native?: boolean
+  logoURI?: string
 }
 
 // ---------------------------------------------------------------------------

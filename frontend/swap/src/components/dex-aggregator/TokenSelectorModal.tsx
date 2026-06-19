@@ -17,6 +17,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
+import TokenIcon from './TokenIcon'
 import type { TokenDisplay } from '@/types'
 
 interface TokenSelectorModalProps {
@@ -269,7 +270,7 @@ function TokenRow({
         }
       }}
     >
-      <span className={`ico ${token.iconClass}`}>{token.glyph}</span>
+      <TokenIcon glyph={token.glyph} iconClass={token.iconClass} logoUri={token.logoUri} alt={token.symbol} />
       <span className="meta">
         <span className="sym">{token.symbol}</span>
         <span className="name">{token.name}</span>

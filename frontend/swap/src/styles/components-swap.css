@@ -392,6 +392,14 @@
   background: var(--slate);
   flex: 0 0 22px;
 }
+/* Logo-image variant of the token badge: fill the circular .ico box with the
+   token's logo, falling back to the glyph span on image error (see TokenIcon).
+   Inherits width/height/border-radius from the contextual .ico rules. */
+.ico-img {
+  object-fit: cover;
+  background: transparent !important;
+  padding: 0;
+}
 .sw-tok .ico.usdc { background: rgba(38,113,235,0.22); border-color: rgba(38,113,235,0.55); color: #c4d8fb; }
 .sw-tok .ico.eth { background: rgba(120,140,230,0.22); border-color: rgba(120,140,230,0.55); color: #cdd6f5; }
 .sw-tok .ico.wbtc { background: rgba(220,91,29,0.22); border-color: rgba(220,91,29,0.55); color: #f6c8a8; }
