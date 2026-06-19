@@ -124,6 +124,17 @@ async function fetchSuperchainTokens(chainId: number): Promise<SolverToken[]> {
 }
 
 /**
+ * Logo URL for a token from SmolDapp's tokenAssets CDN (the same source
+ * Aerodrome's own frontend uses) — keyed by chain + lower-cased address.
+ * Used as the logo for tokens without a curated logoURI; missing entries
+ * 404 and the UI falls back to a symbol glyph (<img onError>), so it's safe
+ * to point every token at it. Loaded via <img>, so no CORS concern.
+ */
+function smolDappLogo(chainId: number, address: string): string {
+  return `https://raw.githubusercontent.com/SmolDapp/tokenAssets/main/tokens/${chainId}/${address.toLowerCase()}/logo-128.png`
+}
+
+/**
  * Fetch the token catalog for a chain. Returns the same shape the old validator
  * `/v1/chains/{id}/tokens` endpoint did, so callers (useAppBootstrap) are
  * unchanged. Throws only if the Superchain backbone fails, so the caller can
@@ -142,7 +153,13 @@ export async function getChainTokens(
     tokens = dedupeByAddress([...superchain, ...AERODROME_BASE_TOKENS])
   }
 
-  return { chain_id: chainId, tokens, count: tokens.length }
+  // Give every token a logo URL: its own (Superchain) when present, else the
+  // SmolDapp CDN by address. The UI falls back to a glyph if the image 404s.
+  return {
+    chain_id: chainId,
+    count: tokens.length,
+    tokens: tokens.map((t) => ({ ...t, logoURI: t.logoURI || smolDappLogo(chainId, t.address) })),
+  }
 }
 
 // ── Apps ─────────────────────────────────────────────────────────────────────

@@ -131,6 +131,7 @@ export function mapSolverTokensToDisplay(
       usd: '$0.00',
       address: t.address,
       native: t.native,
+      logoUri: t.logoURI,
     } satisfies TokenDisplay
   })
 }
