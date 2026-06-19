@@ -92,14 +92,11 @@ export default function TokenSelectorModal({
   const showImportRow =
     isAddrQuery && !existingAddrMatch && canImport && !!onCustomImport
 
-  // Partition into "Your balances" (balance > 0) and "Common" (the rest).
-  const withBalance = filtered.filter(
-    (t) => parseFloat((t.balance ?? '0').replace(/,/g, '')) > 0,
-  )
-  const common = filtered.filter(
-    (t) => parseFloat((t.balance ?? '0').replace(/,/g, '')) <= 0,
-  )
-
+  // Balances aren't fetched for the full token list, so we render a single
+  // flat list and don't show a balance/USD column (it would read 0 / $0.00 for
+  // every token, which is misleading). The selected token's balance still shows
+  // on the swap form. A "Your balances" section can return if we batch-fetch
+  // balances later (e.g. via multicall).
   async function handleImport() {
     if (!onCustomImport || importing) return
     setImporting(true)
@@ -199,45 +196,17 @@ export default function TokenSelectorModal({
             </div>
           )}
 
-          {withBalance.length > 0 && (
-            <>
-              <div className="sw-tmod-section">
-                <span>Your balances</span>
-                <span className="ln" aria-hidden="true" />
-              </div>
-              {withBalance.map((t) => (
-                <TokenRow
-                  key={t.address ?? t.symbol}
-                  token={t}
-                  disabled={t.symbol === oppositeSymbol}
-                  onClick={() => {
-                    onSelect(t)
-                    onClose()
-                  }}
-                />
-              ))}
-            </>
-          )}
-
-          {common.length > 0 && (
-            <>
-              <div className="sw-tmod-section">
-                <span>Common</span>
-                <span className="ln" aria-hidden="true" />
-              </div>
-              {common.map((t) => (
-                <TokenRow
-                  key={t.address ?? t.symbol}
-                  token={t}
-                  disabled={t.symbol === oppositeSymbol}
-                  onClick={() => {
-                    onSelect(t)
-                    onClose()
-                  }}
-                />
-              ))}
-            </>
-          )}
+          {filtered.map((t) => (
+            <TokenRow
+              key={t.address ?? t.symbol}
+              token={t}
+              disabled={t.symbol === oppositeSymbol}
+              onClick={() => {
+                onSelect(t)
+                onClose()
+              }}
+            />
+          ))}
         </div>
       </div>
     </ModalBackdrop>
@@ -275,16 +244,11 @@ function TokenRow({
         <span className="sym">{token.symbol}</span>
         <span className="name">{token.name}</span>
       </span>
-      <span className="right">
-        {disabled ? (
+      {disabled && (
+        <span className="right">
           <span className="dis">Already selected</span>
-        ) : (
-          <>
-            <span className="bal">{token.balance}</span>
-            <span className="usd">{token.usd}</span>
-          </>
-        )}
-      </span>
+        </span>
+      )}
     </div>
   )
 }
