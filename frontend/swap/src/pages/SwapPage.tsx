@@ -52,9 +52,10 @@ import RevealPanel from '@/components/dex-aggregator/RevealPanel'
 import type { ModeBlock } from '@/types'
 
 /**
- * Synthesize a TokenDisplay shape from a functional Token for design components
- * that require TokenDisplay fields (glyph, iconClass). These fields don't exist
- * on the functional Token type — we derive them here rather than polluting Token.
+ * Synthesize a TokenDisplay shape from a functional Token for design components.
+ * glyph/iconClass are derived (they don't exist on Token); address, native and
+ * logoUri pass through so the selected from/to tokens render their logo (with
+ * glyph fallback) just like the rows in the token selector list.
  */
 function toTokenDisplay(t: Token): TokenDisplay {
   const sym = t.symbol.toLowerCase()
@@ -79,6 +80,9 @@ function toTokenDisplay(t: Token): TokenDisplay {
     iconClass: iconMap[sym] ?? 'unknown',
     balance: '—',
     usd: '$0.00',
+    address: t.address,
+    native: t.native,
+    logoUri: t.logoURI,
   }
 }
 
