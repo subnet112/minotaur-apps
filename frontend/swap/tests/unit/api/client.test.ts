@@ -1,105 +1,84 @@
 /**
- * Unit tests for getChainTokens — the token catalog comes from keyless token
- * lists: the Superchain Token List (backbone, all chains) merged with
- * Aerodrome's /api/v1/assets (Base-only, best-effort) for the Aero long tail.
+ * Unit tests for getChainTokens — the token catalog merges the Superchain Token
+ * List (fetched, all chains) with a bundled snapshot of Aerodrome's whitelisted
+ * Base tokens (AERODROME_BASE_TOKENS, no runtime fetch).
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { getChainTokens, TOKEN_LIST_URL, AERODROME_ASSETS_URL } from '@/api/client'
+import { getChainTokens, TOKEN_LIST_URL } from '@/api/client'
+import { AERODROME_BASE_TOKENS } from '@/config/aerodrome-base-tokens'
+
+const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' // in BOTH the Superchain mock + the Aero list
+const SUPRONLY = '0xF0000000000000000000000000000000000000F1' // Base, Superchain-only (not in Aero list)
 
 const SUPERCHAIN = {
   name: 'Superchain Token List',
   tokens: [
-    { chainId: 8453, address: '0xUSDC', name: 'USD Coin', symbol: 'USDC', decimals: 6, logoURI: 'usdc.png' },
-    { chainId: 8453, address: '0xWETH', name: 'Wrapped Ether', symbol: 'WETH', decimals: 18 },
-    { chainId: 8453, address: '0xusdc', name: 'dup', symbol: 'USDC', decimals: 6 }, // dup addr → deduped
-    { chainId: 1, address: '0xMAINNET', name: 'X', symbol: 'X', decimals: 18 },     // other chain
+    { chainId: 8453, address: USDC, symbol: 'USDC', decimals: 6, logoURI: 'usdc.png' },
+    { chainId: 8453, address: SUPRONLY, symbol: 'SUPRONLY', decimals: 18 },
+    { chainId: 1, address: '0xMAINNET', symbol: 'X', decimals: 18 }, // other chain
   ],
 }
 
-// Aerodrome returns { data: [...] }, addresses already lower-cased server-side.
-const AERODROME = {
-  data: [
-    { address: '0xaero', symbol: 'AERO', decimals: 18, logoURI: 'aero.png' },  // Aero-native (new)
-    { address: '0xusdc', symbol: 'USDC', decimals: 6 },                        // overlaps Superchain USDC
-  ],
-}
-
-interface Resp { ok?: boolean; status?: number; body: unknown }
-
-/** Mock global fetch, routing by URL to a Superchain / Aerodrome response. */
-function mockFetch(routes: { superchain?: Resp; aerodrome?: Resp }) {
-  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
-    const url = String(input)
-    const r = url.includes('aerodrome') ? routes.aerodrome : routes.superchain
-    if (!r) throw new Error(`unexpected fetch: ${url}`)
-    return {
-      ok: r.ok ?? true,
-      status: r.status ?? 200,
-      statusText: (r.ok ?? true) ? 'OK' : 'Error',
-      json: async () => r.body,
-    } as Response
-  })
+function mockSuperchain(resp: { ok?: boolean; status?: number; body: unknown }) {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
+    ok: resp.ok ?? true,
+    status: resp.status ?? 200,
+    statusText: (resp.ok ?? true) ? 'OK' : 'Error',
+    json: async () => resp.body,
+  } as Response))
 }
 
 afterEach(() => vi.restoreAllMocks())
 
+describe('AERODROME_BASE_TOKENS (bundled snapshot)', () => {
+  it('is a non-empty, well-formed token list including AERO', () => {
+    expect(AERODROME_BASE_TOKENS.length).toBeGreaterThan(100)
+    for (const t of AERODROME_BASE_TOKENS) {
+      expect(t.address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+      expect(typeof t.symbol).toBe('string')
+      expect(Number.isInteger(t.decimals)).toBe(true)
+    }
+    expect(AERODROME_BASE_TOKENS.some((t) => t.symbol === 'AERO')).toBe(true)
+  })
+})
+
 describe('getChainTokens', () => {
-  it('Base: merges Superchain + Aerodrome, dedupes by address (Superchain wins)', async () => {
-    mockFetch({ superchain: { body: SUPERCHAIN }, aerodrome: { body: AERODROME } })
-
+  it('Base: merges Superchain + bundled Aerodrome, dedupes by address (Superchain wins)', async () => {
+    mockSuperchain({ body: SUPERCHAIN })
     const res = await getChainTokens(8453)
-
-    expect(res.chain_id).toBe(8453)
-    expect(res.tokens.map((t) => t.symbol)).toEqual(['USDC', 'WETH', 'AERO'])
-    // Overlapping USDC keeps the Superchain entry (checksummed addr + logo)
-    const usdc = res.tokens.find((t) => t.symbol === 'USDC')!
-    expect(usdc.address).toBe('0xUSDC')
-    expect(usdc.logoURI).toBe('usdc.png')
-    // Aero-native token surfaced
-    expect(res.tokens.find((t) => t.symbol === 'AERO')?.address).toBe('0xaero')
+    const symbols = res.tokens.map((t) => t.symbol)
+    expect(symbols).toContain('SUPRONLY') // Superchain-only Base token
+    expect(symbols).toContain('AERO')     // from the bundled Aerodrome list
+    // USDC overlaps both lists → present once, Superchain entry wins (keeps logo)
+    const usdcs = res.tokens.filter((t) => t.address.toLowerCase() === USDC.toLowerCase())
+    expect(usdcs).toHaveLength(1)
+    expect(usdcs[0].logoURI).toBe('usdc.png')
+    // union = the Aero set (which includes USDC) + the one Superchain-only Base token
+    expect(res.count).toBe(AERODROME_BASE_TOKENS.length + 1)
   })
 
-  it('Base: Aerodrome failure falls back to Superchain only (no throw)', async () => {
-    mockFetch({ superchain: { body: SUPERCHAIN }, aerodrome: { ok: false, status: 503, body: null } })
-
-    const res = await getChainTokens(8453)
-
-    expect(res.tokens.map((t) => t.symbol)).toEqual(['USDC', 'WETH'])
-    expect(res.tokens.some((t) => t.symbol === 'AERO')).toBe(false)
-  })
-
-  it('Base: malformed Aerodrome body (no data array) → Superchain only', async () => {
-    mockFetch({ superchain: { body: SUPERCHAIN }, aerodrome: { body: { error: 'nope' } } })
-    const res = await getChainTokens(8453)
-    expect(res.count).toBe(2)
-  })
-
-  it('non-Base chain: only the Superchain list is fetched (Aerodrome skipped)', async () => {
-    const fetchSpy = mockFetch({ superchain: { body: SUPERCHAIN } })
-
+  it('non-Base chain: Superchain only, no Aerodrome tokens merged', async () => {
+    const spy = mockSuperchain({ body: SUPERCHAIN })
     const res = await getChainTokens(1)
-
     expect(res.tokens.map((t) => t.symbol)).toEqual(['X'])
-    // Aerodrome endpoint must not be hit for non-Base chains
-    const hitAero = fetchSpy.mock.calls.some((c) => String(c[0]).includes('aerodrome'))
-    expect(hitAero).toBe(false)
-    expect(fetchSpy).toHaveBeenCalledWith(TOKEN_LIST_URL, expect.anything())
+    expect(res.tokens.some((t) => t.symbol === 'AERO')).toBe(false)
+    expect(spy).toHaveBeenCalledWith(TOKEN_LIST_URL, expect.anything())
   })
 
-  it('throws when the Superchain backbone fails (caller falls back to hardcoded)', async () => {
-    mockFetch({ superchain: { ok: false, status: 503, body: null }, aerodrome: { body: AERODROME } })
+  it('Base: a malformed Superchain list still yields the bundled Aerodrome set', async () => {
+    mockSuperchain({ body: { name: 'broken' } })
+    const res = await getChainTokens(8453)
+    expect(res.count).toBe(AERODROME_BASE_TOKENS.length)
+  })
+
+  it('throws when the Superchain backbone fails (caller falls back to hardcoded TOKENS)', async () => {
+    mockSuperchain({ ok: false, status: 503, body: null })
     await expect(getChainTokens(8453)).rejects.toThrow()
   })
 
-  it('tolerates a malformed Superchain list (no tokens array) → empty', async () => {
-    mockFetch({ superchain: { body: { name: 'broken' } }, aerodrome: { body: { data: [] } } })
-    const res = await getChainTokens(8453)
+  it('non-Base: malformed Superchain → empty (Aerodrome not merged)', async () => {
+    mockSuperchain({ body: { name: 'broken' } })
+    const res = await getChainTokens(1)
     expect(res.tokens).toEqual([])
-    expect(res.count).toBe(0)
-  })
-
-  it('exposes the two keyless source URLs', () => {
-    expect(TOKEN_LIST_URL).toContain('optimism')
-    expect(AERODROME_ASSETS_URL).toContain('aerodrome')
   })
 })
