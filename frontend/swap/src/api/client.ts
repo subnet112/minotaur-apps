@@ -67,12 +67,22 @@ export function getChains(): Promise<{ chains: ChainInfo[] }> {
 // Two sources, merged:
 //   • Superchain Token List — static CDN JSON (Token Lists standard), covers
 //     all supported chains; the required backbone.
-//   • Aerodrome /api/v1/assets — Aerodrome's own Base token list (the
-//     velodrome-finance/api stack), best-effort, adds the Aero-native long
-//     tail. Base-only; never blocks the catalog if it's unreachable.
+//   • Aerodrome's Base token list (the velodrome-finance/api stack's
+//     /api/v1/assets), best-effort, adds the Aero-native long tail. Base-only;
+//     never blocks the catalog if it's unreachable.
+//
+// Aerodrome's API sends no CORS headers, so a browser on app.minotaursubnet.com
+// can't read it cross-origin. We fetch it SAME-ORIGIN via a CloudFront proxy:
+// the app distribution has a behavior `/ext/aerodrome/*` whose origin is
+// api.aerodrome.finance, with a CloudFront Function rewriting the path to
+// `/api/v1/*`. So the browser request is same-origin (no CORS) and CloudFront
+// caches the response. Override with VITE_AERODROME_ASSETS_URL in environments
+// without that proxy (e.g. local dev) — on failure we just fall back to
+// Superchain-only. See frontend/swap/infra/cloudfront-aerodrome-proxy.md.
 
 export const TOKEN_LIST_URL = 'https://static.optimism.io/optimism.tokenlist.json'
-export const AERODROME_ASSETS_URL = 'https://api.aerodrome.finance/api/v1/assets'
+export const AERODROME_ASSETS_URL =
+  import.meta.env.VITE_AERODROME_ASSETS_URL || '/ext/aerodrome/assets'
 
 const BASE_CHAIN_ID = 8453
 

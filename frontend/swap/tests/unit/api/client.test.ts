@@ -98,8 +98,11 @@ describe('getChainTokens', () => {
     expect(res.count).toBe(0)
   })
 
-  it('exposes the two keyless source URLs', () => {
+  it('exposes the token source URLs (Aerodrome via same-origin proxy path)', () => {
     expect(TOKEN_LIST_URL).toContain('optimism')
     expect(AERODROME_ASSETS_URL).toContain('aerodrome')
+    // Same-origin (CloudFront proxy) by default, not a cross-origin URL — this
+    // is what avoids the CORS block on api.aerodrome.finance.
+    expect(AERODROME_ASSETS_URL.startsWith('http')).toBe(false)
   })
 })
