@@ -8,6 +8,7 @@
  */
 
 import { DEFAULT_CHAIN_ID } from '@/config/chains'
+import { AERODROME_BASE_TOKENS } from '@/config/aerodrome-base-tokens'
 
 const BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}`
@@ -56,23 +57,24 @@ export function getChains(): Promise<{ chains: ChainInfo[] }> {
   return request('/v1/chains')
 }
 
-// ── Token catalog (external, keyless) ─────────────────────────────────────────
+// ── Token catalog ─────────────────────────────────────────────────────────────
 //
-// The swap token selector is sourced from keyless token lists, NOT the
-// validator. The platform no longer does token discovery: the solver routes
-// any token with a Uniswap V3 / Aerodrome pool on-chain, so any token on these
-// lists is assumed routable and the live quote is the real check. Tokens not on
-// the lists can still be added by pasting their address (SwapPage custom import).
+// The swap token selector is sourced from token lists, NOT the validator. The
+// platform no longer does token discovery: the solver routes any token with a
+// Uniswap V3 / Aerodrome pool on-chain, so any token on these lists is assumed
+// routable and the live quote is the real check. Tokens not on the lists can
+// still be added by pasting their address (SwapPage custom import).
 //
-// Two sources, merged:
-//   • Superchain Token List — static CDN JSON (Token Lists standard), covers
-//     all supported chains; the required backbone.
-//   • Aerodrome /api/v1/assets — Aerodrome's own Base token list (the
-//     velodrome-finance/api stack), best-effort, adds the Aero-native long
-//     tail. Base-only; never blocks the catalog if it's unreachable.
+// Two sources, merged + deduped:
+//   • Superchain Token List — keyless static CDN JSON (Token Lists standard),
+//     covers all supported chains; the required backbone (fetched at runtime).
+//   • AERODROME_BASE_TOKENS — a hardcoded snapshot of Aerodrome's whitelisted
+//     Base tokens, adding the Aero-native long tail. Aerodrome has no public
+//     token-list API; the snapshot comes from its on-chain Sugar lens (see
+//     config/aerodrome-base-tokens.ts + infra/refresh-aerodrome-tokens.md).
+//     Base-only, bundled at build time (no runtime fetch, no CORS).
 
 export const TOKEN_LIST_URL = 'https://static.optimism.io/optimism.tokenlist.json'
-export const AERODROME_ASSETS_URL = 'https://api.aerodrome.finance/api/v1/assets'
 
 const BASE_CHAIN_ID = 8453
 
@@ -89,14 +91,6 @@ interface TokenListEntry {
   chainId: number
   address: string
   name: string
-  symbol: string
-  decimals: number
-  logoURI?: string
-}
-
-/** A token in Aerodrome's /api/v1/assets response ({ data: [...] }). */
-interface AerodromeAsset {
-  address: string
   symbol: string
   decimals: number
   logoURI?: string
@@ -129,19 +123,6 @@ async function fetchSuperchainTokens(chainId: number): Promise<SolverToken[]> {
     .map((t) => ({ address: t.address, symbol: t.symbol, decimals: t.decimals, logoURI: t.logoURI }))
 }
 
-/** Aerodrome's keyless Base token list. Throws on failure (caller best-efforts). */
-async function fetchAerodromeTokens(): Promise<SolverToken[]> {
-  const res = await fetch(AERODROME_ASSETS_URL, { headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    throw new ApiError(res.status, `Aerodrome assets fetch failed: ${res.statusText}`)
-  }
-  const data = (await res.json()) as { data?: AerodromeAsset[] }
-  const list = Array.isArray(data.data) ? data.data : []
-  return list
-    .filter((t) => !!t.address)
-    .map((t) => ({ address: t.address, symbol: t.symbol, decimals: t.decimals, logoURI: t.logoURI }))
-}
-
 /**
  * Fetch the token catalog for a chain. Returns the same shape the old validator
  * `/v1/chains/{id}/tokens` endpoint did, so callers (useAppBootstrap) are
@@ -154,17 +135,11 @@ export async function getChainTokens(
   const superchain = dedupeByAddress(await fetchSuperchainTokens(chainId))
   let tokens = superchain
 
-  // Aerodrome is Base-only — merge its list for the Aero-native long tail.
-  // Best-effort: on any failure (down / CORS / parse) keep the Superchain list
-  // so the selector never breaks on the secondary source.
+  // Aerodrome's whitelist is Base-only — merge the bundled snapshot for the
+  // Aero-native long tail. It's a static import (no fetch, can't fail).
+  // Superchain entries win on overlap (curated metadata + checksummed addr).
   if (chainId === BASE_CHAIN_ID) {
-    try {
-      const aero = await fetchAerodromeTokens()
-      // Superchain entries win on overlap (curated metadata + checksummed addr).
-      tokens = dedupeByAddress([...superchain, ...aero])
-    } catch (err) {
-      console.warn('[swap] Aerodrome token list unavailable, using Superchain only:', err)
-    }
+    tokens = dedupeByAddress([...superchain, ...AERODROME_BASE_TOKENS])
   }
 
   return { chain_id: chainId, tokens, count: tokens.length }
