@@ -23,6 +23,7 @@ export function useAppBootstrap() {
         address: t.address,
         decimals: t.decimals,
         icon: t.symbol === 'WETH' || t.symbol === 'ETH' ? '\u27E0' : t.symbol === 'USDC' || t.symbol === 'USDT' || t.symbol === 'DAI' ? '$' : t.symbol[0],
+        logoURI: t.logoURI,
       }))
 
       // The token list contains only ERC-20s. Inject the native token
