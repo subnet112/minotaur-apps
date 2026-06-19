@@ -21,6 +21,7 @@ import { useId, useState, useRef, useEffect } from 'react'
 import BracketCorners from '@/components/primitives/BracketCorners'
 import type { ActionState, DesignWalletMode, TokenDisplay } from '@/types'
 import ActionButton from './ActionButton'
+import TokenIcon from './TokenIcon'
 import { CHAIN_CONFIG } from '@/config/chains'
 
 interface SwapFormProps {
@@ -321,7 +322,7 @@ export default function SwapForm(props: SwapFormProps) {
             placeholder="0.00"
           />
           <button className="sw-tok" type="button" onClick={props.onPickFromToken}>
-            <span className={`ico ${props.fromToken.iconClass}`}>{props.fromToken.glyph}</span>
+            <TokenIcon glyph={props.fromToken.glyph} iconClass={props.fromToken.iconClass} logoUri={props.fromToken.logoUri} alt={props.fromToken.symbol} />
             <span className="sym">{props.fromToken.symbol}</span>
             <span className="chev" aria-hidden="true">
               <ChevronDown />
@@ -373,7 +374,7 @@ export default function SwapForm(props: SwapFormProps) {
             />
           )}
           <button className="sw-tok" type="button" onClick={props.onPickToToken}>
-            <span className={`ico ${props.toToken.iconClass}`}>{props.toToken.glyph}</span>
+            <TokenIcon glyph={props.toToken.glyph} iconClass={props.toToken.iconClass} logoUri={props.toToken.logoUri} alt={props.toToken.symbol} />
             <span className="sym">{props.toToken.symbol}</span>
             <span className="chev" aria-hidden="true">
               <ChevronDown />

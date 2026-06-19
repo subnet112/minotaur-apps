@@ -64,6 +64,7 @@ export interface TokenDisplay {
   usd: string
   address?: string   // needed for filter dedup + custom import
   native?: boolean
+  logoUri?: string   // token logo (Superchain list or SmolDapp CDN); glyph fallback on error
 }
 
 export interface QuoteDisplay {
