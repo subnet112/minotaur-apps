@@ -178,8 +178,7 @@ export function useQuoteRequest() {
         /rate limit|429|too many requests/i.test(msg)
       if (isRateLimited) {
         toast.transient({
-          title: 'Quote rate-limited',
-          message: 'Slow down — using the previous quote until the limit resets.',
+          title: 'Rate-limited — using the previous quote',
         })
       } else {
         store.setError(msg)

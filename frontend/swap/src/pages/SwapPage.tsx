@@ -181,7 +181,6 @@ export default function SwapPage() {
   const setTokenSelectorOpen = useSwapStore((s) => s.setTokenSelectorOpen)
   const setShowSettings = useSwapStore((s) => s.setShowSettings)
   const setShowDebug = useSwapStore((s) => s.setShowDebug)
-  const setWalletConnected = useSwapStore((s) => s.setWalletConnected)
   const swapTokens = useSwapStore((s) => s.swapTokens)
   const sourceChainId = useSwapStore((s) => s.sourceChainId)
   const chainId = useSwapStore((s) => s.chainId)
@@ -207,12 +206,6 @@ export default function SwapPage() {
   const modeBlockVariant = (modeBlockRaw && modeBlockRaw !== 'none')
     ? modeBlockRaw as Exclude<ModeBlock, 'none'>
     : null
-
-  // Active address — derived from wallet mode + individual address fields
-  const activeAddress = useSwapStore((s) => {
-    if (s.walletMode === 'bittensor' && s.bittensorAddress) return s.bittensorAddress
-    return s.walletAddress
-  })
 
   // Map store wallet mode into design's 3-value union ('managed' retired).
   const designWallet =
@@ -649,7 +642,7 @@ function makeCustomImportHandler(
         import('viem'),
         import('@/config/wagmi'),
       ])
-      const client = getPublicClient(wagmiConfig, { chainId })
+      const client = getPublicClient(wagmiConfig, { chainId: chainId as 8453 })
       if (!client) return null
 
       const tokenAddr = getAddress(addr) as `0x${string}`

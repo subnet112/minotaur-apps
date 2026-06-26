@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Token, QuoteResult, OrderResult, WalletInfo, WalletMode, SwapHistoryItem } from './types'
+import type { Token, QuoteResult, OrderResult, WalletMode, SwapHistoryItem } from './types'
 import { TOKENS, DEFAULT_CHAIN_ID, CHAIN_CONFIG } from '@/config/chains'
 
 /** Cached solver-token list per chain. The validator's /v1/chains/{id}/tokens
@@ -353,7 +353,8 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
         import('viem'),
         import('@/config/wagmi'),
       ])
-      const client = getPublicClient(wagmiConfig, { chainId: s.chainId })
+      // Base-only config → getPublicClient's chainId narrows to the literal 8453.
+      const client = getPublicClient(wagmiConfig, { chainId: s.chainId as 8453 })
       if (!client) { set({ needsApproval: false, needsWrap: false }); return }
       const want = BigInt(String(amount))
       // Native input: does the user hold enough WETH yet, or must they wrap?

@@ -58,7 +58,7 @@ export default function OrderStatusCard({
   // classifyOrderStatus owns the full mapping (subnet OrderStatus enum →
   // step index + flags). Treat any failure-class status as is-failed; treat
   // any terminal status (filled or failed) as is-terminal for the action row.
-  const { stepIdx, isFailed, isFilled, isTerminal } = classifyOrderStatus(step)
+  const { stepIdx, isFailed, isTerminal } = classifyOrderStatus(step)
 
   // For failed states, the prototype freezes the stepper at the 'open' node
   // (idx 1) so the user can see "we got to open then something broke".
