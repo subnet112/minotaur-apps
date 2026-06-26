@@ -1,7 +1,8 @@
 import { useCallback } from 'react'
 import { useSwapStore } from '../store'
 import { useToast } from '@/components/shell'
-import { useWalletClient, usePublicClient } from 'wagmi'
+import { useWalletClient, usePublicClient, useSwitchChain } from 'wagmi'
+import { base } from 'wagmi/chains'
 import { type Address } from 'viem'
 import { CHAIN_CONFIG } from '@/config/chains'
 
@@ -28,8 +29,12 @@ const WETH_DEPOSIT_ABI = [
 
 export function useWrap() {
   const toast = useToast()
-  const { data: walletClient } = useWalletClient()
+  // Bind the wallet client to the app's chain — see useApproval for why an
+  // unbound useWalletClient() causes a wallet-side "null has no properties".
+  const chainId = useSwapStore((s) => s.chainId)
+  const { data: walletClient } = useWalletClient({ chainId })
   const publicClient = usePublicClient()
+  const { switchChainAsync } = useSwitchChain()
 
   const wrap = useCallback(async () => {
     const store = useSwapStore.getState()
@@ -53,6 +58,18 @@ export function useWrap() {
       toast.error({ title: 'Wrap unavailable', message: 'Wallet client not ready — try again in a moment.' })
       return
     }
+    // Ensure the wallet is on the app's chain before sending (see useApproval).
+    if (store.walletChainId != null && store.walletChainId !== store.chainId) {
+      try {
+        await switchChainAsync({ chainId: store.chainId })
+      } catch {
+        toast.error({
+          title: 'Wrong network',
+          message: `Switch your wallet to chain ${store.chainId} and try again.`,
+        })
+        return
+      }
+    }
 
     const toastId = toast.loading({ title: 'Wrapping ETH → WETH…' })
     store.setWrapping(true)
@@ -61,6 +78,7 @@ export function useWrap() {
       // for gas (the wrap + approve txs they sign).
       const amount = BigInt(String(amountStr))
       const txHash = await walletClient.writeContract({
+        chain: base,
         address: weth,
         abi: WETH_DEPOSIT_ABI,
         functionName: 'deposit',
@@ -105,7 +123,7 @@ export function useWrap() {
     } finally {
       store.setWrapping(false)
     }
-  }, [toast, walletClient, publicClient])
+  }, [toast, walletClient, publicClient, switchChainAsync])
 
   return { wrap }
 }

@@ -1,7 +1,8 @@
 import { useCallback, useEffect } from 'react'
 import { useSwapStore } from '../store'
 import { useToast } from '@/components/shell'
-import { useWalletClient, usePublicClient } from 'wagmi'
+import { useWalletClient, usePublicClient, useSwitchChain } from 'wagmi'
+import { base } from 'wagmi/chains'
 import { erc20Abi, type Address } from 'viem'
 import { CHAIN_CONFIG } from '@/config/chains'
 
@@ -24,8 +25,6 @@ import { CHAIN_CONFIG } from '@/config/chains'
  */
 export function useApproval() {
   const toast = useToast()
-  const { data: walletClient } = useWalletClient()
-  const publicClient = usePublicClient()
 
   // Reactive slice — re-run the allowance probe on any of these changes.
   const walletMode = useSwapStore((s) => s.walletMode)
@@ -35,6 +34,16 @@ export function useApproval() {
   const contractAddress = useSwapStore((s) => s.contractAddress)
   const chainId = useSwapStore((s) => s.chainId)
   const quoteInputAmount = useSwapStore((s) => s.quote?.ready_params?.input_amount)
+
+  // Bind the wallet client to the APP's chain (store.chainId). An *unbound*
+  // useWalletClient() follows the wallet's current chain, which resolves to
+  // `undefined` when the wallet sits on a chain not in our wagmi config (only
+  // Base). viem then sends `approve` with no chain context and the injected
+  // provider (Firefox/SpiderMonkey) throws a raw "null has no properties"
+  // TypeError, which viem relays verbatim as a fake "approve reverted" reason.
+  const { data: walletClient } = useWalletClient({ chainId })
+  const publicClient = usePublicClient()
+  const { switchChainAsync } = useSwitchChain()
 
   useEffect(() => {
     // checkAllowance reads its own deps off the store; we just trigger it.
@@ -74,6 +83,20 @@ export function useApproval() {
       toast.error({ title: 'Approval unavailable', message: 'Wallet client not ready — try again in a moment.' })
       return
     }
+    // The wallet must be on the app's chain before sending. A known-mismatched
+    // wallet chain is what drives the injected provider's null-deref, so switch
+    // first (abort cleanly if the user rejects the switch).
+    if (store.walletChainId != null && store.walletChainId !== store.chainId) {
+      try {
+        await switchChainAsync({ chainId: store.chainId })
+      } catch {
+        toast.error({
+          title: 'Wrong network',
+          message: `Switch your wallet to chain ${store.chainId} and try again.`,
+        })
+        return
+      }
+    }
 
     const toastId = toast.loading({ title: `Approving ${tokenSymbol}…` })
     store.setApproving(true)
@@ -82,6 +105,7 @@ export function useApproval() {
       // manually; exact-amount approvals are safer and easier to revoke.
       const amount = BigInt(String(amountStr))
       const txHash = await walletClient.writeContract({
+        chain: base,
         address: tokenAddr,
         abi: erc20Abi,
         functionName: 'approve',
@@ -132,7 +156,7 @@ export function useApproval() {
     } finally {
       store.setApproving(false)
     }
-  }, [toast, walletClient, publicClient])
+  }, [toast, walletClient, publicClient, switchChainAsync])
 
   return { approve }
 }
