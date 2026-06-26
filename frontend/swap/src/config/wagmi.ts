@@ -6,10 +6,7 @@
  * RainbowKit's modal exposes.
  */
 
-import {
-  connectorsForWallets,
-  type Wallet,
-} from '@rainbow-me/rainbowkit'
+import { connectorsForWallets } from '@rainbow-me/rainbowkit'
 import {
   injectedWallet,
   metaMaskWallet,
@@ -43,7 +40,9 @@ const chains = [base] as const
 const WC_PROJECT_ID =
   (import.meta.env.VITE_WC_PROJECT_ID as string | undefined)?.trim() ?? ''
 
-const baseWallets: Wallet[] = [
+// Wallet factories (CreateWalletFn) — let inference type the array so it
+// matches connectorsForWallets' expected `wallets: CreateWalletFn[]`.
+const baseWallets = [
   injectedWallet,
   metaMaskWallet,
   rainbowWallet,

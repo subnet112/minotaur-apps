@@ -3,8 +3,6 @@ import { useToast } from '@/components/shell'
 import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
 import { shorten } from '../utils'
-import type { Token } from '../types'
-import * as api from '@/api/client'
 import { useAccount, useChainId, useSwitchChain, useDisconnect } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 
