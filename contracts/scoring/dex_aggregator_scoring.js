@@ -6,21 +6,39 @@
 //   state   = flattened IntentState (_intent_function, order params merged)
 //   context = { simulation: {...}, state: {...}, oracle: {...}, timestamp, ... }
 //
-// Scores DEX swap execution quality. Evaluates:
+// Scores DEX swap execution by the RAW delivered output to the receiver — no
+// quote anchor, no gas term, no [0,1] weighting. The validator's adoption rule
+// (relative per-order) compares challenger vs champion on this raw output, read
+// from metadata.raw_output (the engine clamps `score` to [0,1], so `score` is a
+// validity sentinel only). Evaluates:
 //   1. Simulation success
-//   2. Output amount vs the QUOTE (quotedOutput) — primary metric. The min is
-//      only the execution slippage guard, NOT the scoring anchor.
-//   3. Gas efficiency
+//   2. Raw output delivered to the receiver (EXACT wei, summed as BigInt)
+//   3. Validity: raw_output >= min (the slippage guard)
 // =============================================================================
 
 var config = {
   name: "DexAggregator",
-  version: "1.0.0",
+  version: "2.0.0",
   type: "dex_aggregator",
 };
 
 function runtimeParams(state) {
   return state.typed_context || state.raw_params || state.rawParams || {};
+}
+
+// Parse a token amount as EXACT integer wei (BigInt). Amounts arrive as decimal
+// strings; a non-integer / garbage amount is SKIPPED (returns null), never thrown
+// — a single bad transfer can't break the score. BigInt is whitelisted in the
+// engine's vm sandbox.
+function toBigIntAmount(v) {
+  if (v === null || v === undefined) return null;
+  var s = String(v).trim();
+  if (!/^[0-9]+$/.test(s)) return null; // non-negative integer wei only
+  try {
+    return BigInt(s);
+  } catch (e) {
+    return null;
+  }
 }
 
 var manifest = {
@@ -447,99 +465,63 @@ function score(plan, state, context) {
     return { score: 0, valid: false, reason: "No token transfers detected" };
   }
 
-  // Find output token transfer to the receiver (or app address)
-  var outputAmount = 0;
+  // Sum the output-token transfers delivered to the receiver (or the app, which
+  // delivers in _checkIntent) as EXACT integer wei (BigInt) — amounts above 2^53
+  // are not rounded by IEEE-754. A garbage/non-integer amount is skipped.
+  var total = BigInt(0);
   for (var i = 0; i < transfers.length; i++) {
     var t = transfers[i];
     var toAddr = (t.to_addr || t.to || "").toLowerCase();
     var tokenAddr = (t.token || t.token_address || "").toLowerCase();
-
     // Output goes to receiver or app (app delivers in _checkIntent)
     if (tokenAddr === tokenOut && (toAddr === receiver || toAddr === appAddr)) {
-      outputAmount += parseFloat(t.amount || t.value || "0");
+      var amt = toBigIntAmount(t.amount !== undefined && t.amount !== null ? t.amount : t.value);
+      if (amt !== null) {
+        total += amt;
+      }
     }
   }
 
-  if (outputAmount === 0) {
+  if (total === BigInt(0)) {
     return {
       score: 0,
       valid: false,
       reason: "No output tokens received by receiver",
+      metadata: { raw_output: "0" },
     };
   }
 
-  // 4. Execution validity: the swap must meet the slippage-guard min if one is
-  //    set. (A swap that reverted on-chain would have no transfers; this is a
-  //    defensive re-check.) min is ONLY the execution guard now — NOT the
-  //    scoring anchor.
-  var minOut = parseFloat(minAmountOut);
-  if (minOut > 0 && outputAmount < minOut) {
+  // 4. Validity guard: the swap must clear the slippage-guard min if one is set
+  //    (BigInt, no float). min is ONLY the execution guard — there is no scoring
+  //    anchor. (A swap that reverted on-chain would have no transfers.)
+  var minOut = toBigIntAmount(minAmountOut);
+  if (minOut === null) minOut = BigInt(0);
+  if (minOut > BigInt(0) && total < minOut) {
     return {
       score: 0,
       valid: false,
-      reason:
-        "Output below minimum: " +
-        outputAmount.toFixed(0) +
-        " < " +
-        minOut.toFixed(0),
+      reason: "Output below minimum: " + total.toString() + " < " + minOut.toString(),
+      metadata: { raw_output: "0", output_amount: total.toString(), min_amount_out: minOut.toString() },
     };
   }
 
-  // 5. Score components
-  // Output quality anchored on the QUOTE (the honest promise we showed the
-  // user), NOT the slippage-guard min. 0.5 at exactly the quote, ramped up to
-  // 1.0 at 2x above and DOWN to 0 below — so an honest market execution (which
-  // lands ~at the quote) scores ~0.5 instead of saturating, and only genuine
-  // improvement over the quote scores >0.5. Mirrors the on-chain _scoreVsQuote
-  // curve. Falls back to the min when no quote was supplied (quotedOutput == 0).
-  var quotedOutput = params.quoted_output || params.quotedOutput || "0";
-  var quoted = parseFloat(quotedOutput);
-  var anchor = quoted > 0 ? quoted : minOut;
-  if (anchor <= 0) {
-    return { score: 0, valid: false, reason: "No quote or min to score against" };
-  }
-
-  var outputRatio = outputAmount / anchor;
-  var outputScore;
-  if (outputRatio >= 2.0) {
-    outputScore = 1.0;
-  } else if (outputRatio >= 1.0) {
-    outputScore = 0.5 + (outputRatio - 1.0) * 0.5;
-  } else {
-    outputScore = outputRatio * 0.5; // ramp 0 -> 0.5 below the quote
-  }
-
-  // Gas efficiency: penalize high gas usage
-  var gasScore = gasUsed > 0 ? Math.max(0, 1 - gasUsed / 1000000) : 0.5;
-
-  // Weighted final score
-  var finalScore = outputScore * 0.8 + gasScore * 0.2;
-  finalScore = Math.max(0, Math.min(1.0, finalScore));
-
+  // 5. The score carrier is metadata.raw_output, the RAW delivered output as an
+  //    EXACT DECIMAL WEI STRING — no quote anchor, no gas term, no weighting.
+  //    `score` is only a validity sentinel (1) because the engine clamps it to
+  //    [0, 1]; the adoption rule reads metadata.raw_output.
   return {
-    score: finalScore,
+    score: 1,
     valid: true,
-    reason:
-      "Swap OK: output=" +
-      outputAmount.toFixed(0) +
-      " quote=" +
-      anchor.toFixed(0) +
-      " ratio=" +
-      outputRatio.toFixed(4) +
-      " gas=" +
-      gasUsed,
+    reason: "Raw output delivered: " + total.toString() + " (min=" + minOut.toString() + " gas=" + gasUsed + ")",
     breakdown: {
-      output_score: outputScore,
-      output_ratio: outputRatio,
-      gas_score: gasScore,
+      min_amount_out: minOut.toString(),
       gas_used: gasUsed,
       num_transfers: transfers.length,
     },
     metadata: {
-      output_amount: outputAmount,
-      min_amount_out: minOut,
-      quoted_output: quoted,
-      surplus_over_quote: outputAmount - anchor,
+      raw_output: total.toString(),
+      output_amount: total.toString(),
+      min_amount_out: minOut.toString(),
     },
   };
 }
