@@ -23,8 +23,18 @@ export interface OrderStatusCardProps {
   orderId: string
   /** store.activeOrder.tx_hash */
   txHash?: string
-  /** store.activeOrder.score */
+  /**
+   * store.activeOrder.score — post relative-cutover this is a 0/1 VALIDITY
+   * SENTINEL (1.0 = valid plan), NOT a quality grade. Rendered as a pass/fail
+   * "valid" indicator, never as a percentage.
+   */
   score?: number
+  /**
+   * store.activeOrder.on_chain_score — the contract's scoreIntent result in
+   * BPS (0–10000). The real delivered-quality signal; percent = /100. 100% is
+   * unreachable on-chain by design (asymptotic cap).
+   */
+  onChainScore?: number | null
   /** store.executionDetails.amountOut (formatted string) */
   output?: string
   /** store.executionDetails.surplus (formatted string) */
@@ -48,6 +58,7 @@ export default function OrderStatusCard({
   orderId,
   txHash,
   score,
+  onChainScore,
   output,
   surplus,
   fee,
@@ -82,7 +93,14 @@ export default function OrderStatusCard({
 
   // Visibility gates — items reveal as the order progresses
   const showTxHash = currentIdx >= 1 || isFailed
-  const showScore = score != null && currentIdx >= 3
+  // Quality = on-chain scoreIntent (BPS → %). `score` is only a validity
+  // sentinel, so we show the on-chain quality and a separate valid flag.
+  const qualityPct =
+    onChainScore != null && Number.isFinite(Number(onChainScore))
+      ? Number(onChainScore) / 100
+      : null
+  const showQuality = qualityPct != null && currentIdx >= 3
+  const showValid = score != null && currentIdx >= 3
   const showOutput = output != null && currentIdx >= 4
   const showSurplus = surplus != null && currentIdx >= 5
   const showFee = fee != null && currentIdx >= 4
@@ -181,9 +199,15 @@ export default function OrderStatusCard({
             </span>
           </div>
           <div className="row">
-            <span className="k">Score</span>
-            <span className={`v ${showScore ? '' : 'dim'}`.trim()}>
-              {showScore && score != null ? score.toFixed(4) : '—'}
+            <span className="k">Quality</span>
+            <span className={`v ${showQuality ? '' : 'dim'}`.trim()}>
+              {showQuality && qualityPct != null ? `${qualityPct.toFixed(1)}%` : '—'}
+            </span>
+          </div>
+          <div className="row">
+            <span className="k">Plan</span>
+            <span className={`v ${showValid ? '' : 'dim'}`.trim()}>
+              {showValid && score != null ? (Number(score) > 0 ? 'valid' : 'invalid') : '—'}
             </span>
           </div>
           <div className="row">

@@ -60,12 +60,16 @@ export function useOrderSubmission() {
 
           if (isFilled) {
             // One-shot toast for terminal filled state (separate from submit flow).
-            // Use score as a proxy for surplus display — execution details may not
-            // be available yet (they're fetched from the tx receipt below).
-            const scoreStr = status.score != null ? `Score: ${status.score}` : undefined
+            // Quality = on-chain scoreIntent (BPS → %); status.score is only a
+            // validity sentinel (~1.0), so never show it as the score.
+            const ocs = (status as Record<string, unknown>).on_chain_score
+            const qualityStr =
+              ocs != null && Number.isFinite(Number(ocs))
+                ? `Quality: ${(Number(ocs) / 100).toFixed(1)}%`
+                : undefined
             toast.success({
               title: 'Swap filled',
-              message: scoreStr,
+              message: qualityStr,
             })
             // Fetch execution details from tx receipt via viem's public client
             // (wagmi-injected — same RPC the rest of the app uses).
