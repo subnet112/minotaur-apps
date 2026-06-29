@@ -3,7 +3,7 @@ import { useSwapStore } from '../store'
 import { useToast } from '@/components/shell'
 import { useWalletClient, usePublicClient, useSwitchChain } from 'wagmi'
 import { base } from 'wagmi/chains'
-import { erc20Abi, type Address } from 'viem'
+import { erc20Abi, maxUint256, type Address } from 'viem'
 import { CHAIN_CONFIG } from '@/config/chains'
 
 /**
@@ -98,12 +98,17 @@ export function useApproval() {
       }
     }
 
-    const toastId = toast.loading({ title: `Approving ${tokenSymbol}…` })
+    // "Unlimited approval" (Settings) → approve max so the user approves once
+    // and swaps forever; otherwise approve the exact required amount (safer,
+    // easier to revoke). The store flag is the source of truth for this toggle.
+    const unlimited = store.unlimitedApproval
+    const amount = unlimited ? maxUint256 : BigInt(String(amountStr))
+
+    const toastId = toast.loading({
+      title: `Approving ${tokenSymbol}${unlimited ? ' (unlimited)' : ''}…`,
+    })
     store.setApproving(true)
     try {
-      // Approve the exact required amount. Users wanting MAX can do it
-      // manually; exact-amount approvals are safer and easier to revoke.
-      const amount = BigInt(String(amountStr))
       const txHash = await walletClient.writeContract({
         chain: base,
         address: tokenAddr,
