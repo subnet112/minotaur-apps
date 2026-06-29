@@ -116,9 +116,13 @@ var manifest = {
         unwrap_output: {
           type: "bool",
           description:
-            "Deliver native ETH/TAO instead of the wrapped token (derived by the encoder when output == wrapped native)",
+            "Deliver native ETH/TAO instead of the wrapped token. Defaults to " +
+            "true; harmless for non-native outputs because the contract only " +
+            "unwraps when tokenOut == wrappedNative, so the encoder needs no " +
+            "token-aware logic.",
           source: "system",
           in_signature: false,
+          default: true,
         },
       },
       // Provide ONLY the params the user/system supplies. Do NOT include
@@ -135,7 +139,7 @@ var manifest = {
         permit_v: "0",
         permit_r: "0x0000000000000000000000000000000000000000000000000000000000000000",
         permit_s: "0x0000000000000000000000000000000000000000000000000000000000000000",
-        unwrap_output: false,
+        unwrap_output: true,
       },
       scoring_hints: {
         goal: "Maximize output tokens received relative to the quote (quotedOutput)",
