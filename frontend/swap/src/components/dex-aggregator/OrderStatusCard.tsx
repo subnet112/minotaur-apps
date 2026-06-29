@@ -35,6 +35,9 @@ export interface OrderStatusCardProps {
   gas?: string
   /** store.activeOrder.error — surfaced verbatim when isFailed. */
   errorMessage?: string
+  /** store.orderStalled — client-side stall (e.g. validators never scored it).
+   *  Flips the card to a failed treatment while keeping the reached stage. */
+  stalled?: boolean
   /** CHAIN_CONFIG[chainId].explorer */
   explorerBaseUrl?: string
   onNewSwap: () => void
@@ -50,19 +53,25 @@ export default function OrderStatusCard({
   fee,
   gas,
   errorMessage,
+  stalled = false,
   explorerBaseUrl = '',
   onNewSwap,
 }: OrderStatusCardProps) {
   const toast = useToast()
 
   // classifyOrderStatus owns the full mapping (subnet OrderStatus enum →
-  // step index + flags). Treat any failure-class status as is-failed; treat
-  // any terminal status (filled or failed) as is-terminal for the action row.
-  const { stepIdx, isFailed, isTerminal } = classifyOrderStatus(step)
+  // step index + flags). A client-side stall (validators never scored the
+  // order) is also a failure: fold it into the failed/terminal treatment.
+  const { stepIdx, isFailed: statusFailed, isTerminal: statusTerminal } = classifyOrderStatus(step)
+  const isFailed = statusFailed || stalled
+  const isTerminal = statusTerminal || stalled
 
-  // For failed states, the prototype freezes the stepper at the 'open' node
-  // (idx 1) so the user can see "we got to open then something broke".
-  const currentIdx = isFailed ? 1 : stepIdx
+  // Where to freeze the stepper + which node to mark failed:
+  //   - stalled       → the actual reached node (e.g. SOLVED) — show how far it got
+  //   - backend-failed → the 'open' node (idx 1), per the prototype
+  //   - otherwise      → the live node
+  const currentIdx = stalled ? Math.max(stepIdx, 0) : statusFailed ? 1 : stepIdx
+  const failedIdx = stalled ? currentIdx : statusFailed ? 1 : -1
 
   // Lime segment geometry. The 6 nodes sit at evenly-spaced positions
   // (12 columns, each node at 1/12 + idx*2/12 = 8.33% + idx*16.66%).
@@ -117,9 +126,10 @@ export default function OrderStatusCard({
           </button>
           {/* Show the actual terminal status name — was hard-coded to
               "filled" so rejected/cancelled/expired orders all read as
-              filled in the card header. */}
+              filled in the card header. A client-side stall reads as "stalled"
+              rather than its frozen raw status (e.g. "solved"). */}
           {isTerminal && (
-            <span className="v">&nbsp;·&nbsp;{step}</span>
+            <span className="v">&nbsp;·&nbsp;{stalled ? 'stalled' : step}</span>
           )}
         </span>
       </div>
@@ -131,9 +141,9 @@ export default function OrderStatusCard({
           )}
           {STEPS.map((s, idx) => {
             const cls = isFailed
-              ? idx === 1
-                ? 'is-failed' // mark "open" as the failed node per prototype v4
-                : idx === 0
+              ? idx === failedIdx
+                ? 'is-failed' // the node we stalled/failed on
+                : idx < failedIdx
                 ? 'is-done'
                 : ''
               : idx < currentIdx
@@ -203,8 +213,9 @@ export default function OrderStatusCard({
 
           {/* Surface the API's `error` field verbatim when the order failed.
               The receipt page shows the same string; this gives the user
-              the reason in-place without leaving the swap surface. */}
-          {isFailed && errorMessage && (
+              the reason in-place without leaving the swap surface. A stalled
+              order has no server error, so explain the client-side timeout. */}
+          {isFailed && (errorMessage || stalled) && (
             <div className="row" style={{ alignItems: 'flex-start' }}>
               <span className="k">Reason</span>
               <span
@@ -219,7 +230,8 @@ export default function OrderStatusCard({
                   wordBreak: 'break-word',
                 }}
               >
-                {errorMessage}
+                {errorMessage ||
+                  'Validators did not score this order in time, so it was never filled. No funds moved — you can retry.'}
               </span>
             </div>
           )}

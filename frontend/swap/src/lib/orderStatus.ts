@@ -49,7 +49,48 @@ export const TERMINAL_FAILED = new Set<string>([
   'bridge_failed',
   'rolled_back',
   'partial_rollback',
+  // CLIENT-SIDE synthetic status (not a server enum): an order that sat in a
+  // non-terminal state too long without progressing — see `isOrderStalled`.
+  // The common case is validators never scoring a 'solved' order, so the
+  // backend status never advances and the card would otherwise spin forever.
+  'stalled',
 ])
+
+/**
+ * How long an order may sit in a non-terminal state WITHOUT its status
+ * advancing before the UI gives up and treats it as failed ("stalled").
+ *
+ * The backend has no "scoring failed" status — when validators fail to score
+ * a solved order it simply never leaves 'solved', so polling never stops and
+ * the card freezes at SOLVED (this is the bug this guards against). 3 minutes
+ * comfortably exceeds a healthy solved → scored → consensus → filled cycle.
+ */
+export const ORDER_STALL_TIMEOUT_MS = 3 * 60 * 1000
+
+/**
+ * Non-terminal statuses where a long, quiet wait is EXPECTED — cross-chain
+ * bridge legs and substrate unstaking can legitimately take many minutes.
+ * Exempt from the stall timer so a slow-but-healthy settlement isn't flagged.
+ */
+export const STALL_EXEMPT = new Set<string>([
+  'bridging',
+  'unstaking',
+  'executing_leg',
+])
+
+/**
+ * Whether a still-polling order should be considered stalled (a client-side
+ * failure): it's non-terminal, not in a known-slow state, and its status
+ * hasn't changed for at least ``ORDER_STALL_TIMEOUT_MS``.
+ */
+export function isOrderStalled(
+  status: string | null | undefined,
+  msSinceLastChange: number,
+): boolean {
+  const s = String(status ?? '')
+  if (!s || TERMINAL_STATUSES.has(s) || STALL_EXEMPT.has(s)) return false
+  return msSinceLastChange >= ORDER_STALL_TIMEOUT_MS
+}
 
 /** Union of all terminal statuses — for "stop polling / lock active order" logic. */
 export const TERMINAL_STATUSES = new Set<string>([
