@@ -33,20 +33,23 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 ///         Execution flow (via _handleIntent → _swap dispatch):
 ///           1. Decode params, handle optional ERC-2612 permit.
 ///           2. Deploy EphemeralProxy, fund it, execute solver's plan calls.
-///           3. Verify output >= minAmountOut, deliver protocol fee in WETH
-///              (from output when tokenOut==WETH and surplus covers it; otherwise
-///              from the app's paymaster), capture positive-slippage fee in
-///              tokenOut, deliver remainder to receiver.
+///           3. Verify output >= minAmountOut, deliver the protocol fee in WETH
+///              from the app's paymaster (direction-independent — see fee model),
+///              capture positive-slippage fee in tokenOut, deliver remainder to
+///              receiver.
 ///
 ///         Fee model:
 ///           - This app deploys in `FeeMode.APP` by default. The end user only
 ///             approves `amountIn` of `tokenIn` — they NEVER hold or approve
-///             the wrapped native token. The app pays the protocol fee in WETH
-///             out of the swap surplus (when possible) or its own working
-///             capital (paymaster).
-///           - The paymaster (typically the same address as `feeCollector`)
-///             must pre-approve this contract to pull WETH. App operator is
-///             responsible for keeping a WETH float on the paymaster.
+///             the wrapped native token, and NEVER bear the protocol fee.
+///           - The protocol fee is ALWAYS paid in WETH by the app's paymaster
+///             (`_settleAppProtocolFee`), regardless of `tokenOut`. It is never
+///             skimmed from the user's output, so fee incidence is identical
+///             for every order. The paymaster (typically the same address as
+///             `feeCollector`) must pre-approve this contract to pull WETH; the
+///             app operator keeps a WETH float on it.
+///           - App revenue (positive-slippage capture) is separate and stays in
+///             `tokenOut` at `feeCollector`.
 contract DexAggregatorApp is AppIntentBase {
     using SafeERC20 for IERC20;
 
@@ -180,6 +183,38 @@ contract DexAggregatorApp is AppIntentBase {
         return _decodePlatformFee(order.intentParams);
     }
 
+    // ── Protocol fee settlement (APP mode) ─────────────────────────────────
+
+    /// @notice Settle the APP-mode protocol fee by pulling WETH from the app
+    ///         paymaster — direction-independent.
+    /// @dev Single settlement path shared by `_swap` and `_bridge`. The fee is
+    ///      ALWAYS sourced from `appPaymaster`, never from the user and never
+    ///      skimmed from the swap output, so fee incidence is identical for
+    ///      every order regardless of which token happens to be `tokenOut`.
+    ///      This makes good on the app's stated invariant — "the end user only
+    ///      approves amountIn of tokenIn and NEVER bears the protocol fee."
+    ///      Previously the fee was deducted in-place when `tokenOut == WETH`,
+    ///      which silently charged the user on those orders and left the source
+    ///      dependent on trade direction (see issue: incoherent native-token
+    ///      handling).
+    ///
+    ///      USER mode is settled by AppIntentBase before `_handleIntent` runs,
+    ///      and the native-input path (`msg.value > 0`) is settled there too —
+    ///      both are no-ops here. The base's `_verifyFeeSettlementPost` confirms
+    ///      `platformFeeCollector` grew by `feeOwed` after `_handleIntent`, so a
+    ///      silent skip reverts the whole order.
+    function _settleAppProtocolFee(IntentOrder calldata order) internal {
+        if (feeMode != AppIntentBase.FeeMode.APP || msg.value != 0) return;
+        uint256 raw = _calculateProtocolFee(order);
+        if (raw == 0) return;
+        uint256 platformFee = _clampFee(raw);
+        if (platformFee == 0) return;
+        require(appPaymaster != address(0), "App paymaster not set");
+        IERC20(address(wrappedNativeToken)).safeTransferFrom(
+            appPaymaster, platformFeeCollector, platformFee
+        );
+    }
+
     // ── Intent dispatch ────────────────────────────────────────────────────
 
     /// @notice Dispatch to real intent functions based on intentSelector
@@ -207,7 +242,7 @@ contract DexAggregatorApp is AppIntentBase {
         (
             address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, address receiver,
             uint256 permitDeadline, uint8 permitV, bytes32 permitR, bytes32 permitS,
-            uint256 platformFeeRaw,
+            , // platformFeeWei — read + settled via _settleAppProtocolFee/_calculateProtocolFee
             uint256 quotedOutput,
             bool unwrapOutput
         ) = abi.decode(order.intentParams, (address, address, uint256, uint256, address, uint256, uint8, bytes32, bytes32, uint256, uint256, bool));
@@ -223,32 +258,12 @@ contract DexAggregatorApp is AppIntentBase {
         uint256 gained = _gained(tokenOut);
         if (gained < minAmountOut) return (0, false);
 
-        // 3. Deliver protocol fee in WETH (APP mode only — USER mode was
-        //    settled by AppIntentBase before _handleIntent ran, and on the
-        //    native-input path the base already returned early).
-        //
-        //    Strategy:
-        //      a) tokenOut == WETH and surplus ≥ fee → take from output
-        //         (no DEX hop, no paymaster touch).
-        //      b) otherwise → pull WETH from appPaymaster.
-        //
-        //    Either path delivers to platformFeeCollector in WETH wei. The
-        //    base verifies the collector balance grew by ≥ feeOwed after
-        //    _handleIntent returns. Silent skip is intentionally NOT
-        //    supported — the protocol fee is mandatory.
-        if (feeMode == AppIntentBase.FeeMode.APP && platformFeeRaw > 0 && msg.value == 0) {
-            uint256 platformFee = _clampFee(platformFeeRaw);
-            if (platformFee > 0) {
-                address weth = address(wrappedNativeToken);
-                if (tokenOut == weth && gained >= minAmountOut + platformFee) {
-                    IERC20(weth).safeTransfer(platformFeeCollector, platformFee);
-                    gained -= platformFee;
-                } else {
-                    require(appPaymaster != address(0), "App paymaster not set");
-                    IERC20(weth).safeTransferFrom(appPaymaster, platformFeeCollector, platformFee);
-                }
-            }
-        }
+        // 3. Deliver the protocol fee in WETH from the app paymaster (APP mode).
+        //    Direction-independent and shared with _bridge — never skimmed from
+        //    the user's output, even when tokenOut == WETH. The base verifies
+        //    the collector balance grew by ≥ feeOwed after _handleIntent
+        //    returns; a silent skip reverts the order.
+        _settleAppProtocolFee(order);
 
         // 4. Capture price improvement over the quoted output (app revenue,
         //    in tokenOut). CoW-style: the fee is a share of execution ABOVE the
@@ -376,18 +391,9 @@ contract DexAggregatorApp is AppIntentBase {
         uint256 bridged = amountIn - remaining;
         if (bridged < minBridged) return (0, false);
 
-        // 3. App-mode protocol fee fallback: bridge legs don't have a
-        //    "swap surplus" to draw on. Pull from paymaster directly.
-        uint256 platformFeeRaw = _calculateProtocolFee(order);
-        if (feeMode == AppIntentBase.FeeMode.APP && platformFeeRaw > 0 && msg.value == 0) {
-            uint256 platformFee = _clampFee(platformFeeRaw);
-            if (platformFee > 0) {
-                require(appPaymaster != address(0), "App paymaster not set");
-                IERC20(address(wrappedNativeToken)).safeTransferFrom(
-                    appPaymaster, platformFeeCollector, platformFee
-                );
-            }
-        }
+        // 3. App-mode protocol fee: pull from the paymaster (same path as
+        //    _swap — bridge legs have no swap surplus to draw on anyway).
+        _settleAppProtocolFee(order);
 
         // 4. Score: 5000 at minBridged, 10000 at full amount
         score = _scoreLinear(bridged, minBridged);

@@ -326,6 +326,80 @@ contract DexAggregatorTest is Test {
         assertEq(weth.balanceOf(userAddr), 0, "all user WETH went to the swap");
     }
 
+    function test_platformFee_wethOutput_paidFromPaymaster_notSkimmed() public {
+        // Regression for the fee-source consolidation (issue: incoherent
+        // native-token handling). When tokenOut == WETH, the OLD contract
+        // skimmed the protocol fee straight out of the user's output
+        // (`gained -= platformFee`) — silently charging the user on exactly
+        // those orders, while every other direction billed the paymaster.
+        // The consolidated `_settleAppProtocolFee` is direction-independent:
+        // the fee ALWAYS comes from the paymaster and the user keeps the full
+        // output, regardless of tokenOut. This test pins that — it is the
+        // tokenOut == WETH case that previously had no coverage.
+        MockDex wdex = new MockDex();
+        wdex.setDecimals(18, 18);
+        wdex.setRate(1);                 // 1:1 (mock units)
+        weth.mint(address(wdex), 10e18); // WETH reserves for the dex to pay out
+
+        uint256 amountIn = 2e18;
+        uint256 minOut = 1.5e18;
+        uint256 platformFee = 0.002 ether;
+
+        usdc.mint(userAddr, amountIn);
+        vm.prank(userAddr);
+        usdc.approve(address(app), amountIn);
+
+        // Paymaster (== feeCollector here) fronts the protocol fee in WETH.
+        weth.mint(feeCollector, platformFee * 10);
+        vm.prank(feeCollector);
+        weth.approve(address(app), type(uint256).max);
+
+        bytes memory intentParams = abi.encode(
+            address(usdc), address(weth), amountIn, minOut, userAddr,
+            uint256(0), uint8(0), bytes32(0), bytes32(0),
+            platformFee,
+            uint256(0),  // quotedOutput (0 ⇒ no app slippage fee — isolate the protocol fee)
+            false        // unwrapOutput false ⇒ user receives WETH (not native ETH)
+        );
+
+        bytes32 orderId = keccak256("weth_out_fee_from_paymaster");
+        IAppIntentBase.IntentOrder memory order = IAppIntentBase.IntentOrder({
+            orderId: orderId, app: address(app), intentSelector: app.SWAP_SELECTOR(),
+            intentParams: intentParams, submittedBy: userAddr, chainId: block.chainid,
+            deadline: block.timestamp + 3600, nonce: 0, perpetual: false,
+            maxExecutions: 1, cooldown: 0
+        });
+
+        IAppIntentBase.Call[] memory calls = new IAppIntentBase.Call[](2);
+        calls[0] = IAppIntentBase.Call({
+            target: address(usdc), value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(wdex), type(uint256).max))
+        });
+        calls[1] = IAppIntentBase.Call({
+            target: address(wdex), value: 0,
+            callData: abi.encodeCall(wdex.swap, (address(usdc), address(weth), amountIn, 0, address(app)))
+        });
+        IAppIntentBase.ExecutionPlan memory plan = IAppIntentBase.ExecutionPlan({
+            calls: calls, deadline: order.deadline, nonce: 0, metadata: ""
+        });
+
+        uint256 paymasterWethBefore = weth.balanceOf(feeCollector);
+
+        vm.prank(relayerAddr);
+        (, bool valid) = app.scoreIntent(order, plan);
+        assertTrue(valid, "weth-output swap should succeed");
+
+        // Protocol fee landed at platformFeeCollector (relayerAddr), in WETH.
+        assertEq(weth.balanceOf(relayerAddr), platformFee,
+            "protocol fee delivered to platformFeeCollector in WETH");
+        // Sourced from the paymaster — NOT skimmed from the swap output.
+        assertEq(weth.balanceOf(feeCollector), paymasterWethBefore - platformFee,
+            "paymaster WETH float covered the fee");
+        // The user keeps the FULL output; nothing was deducted for the fee.
+        assertEq(weth.balanceOf(userAddr), amountIn,
+            "user receives full WETH output (fee NOT skimmed from output)");
+    }
+
     function test_platformFee_exceedsCap_reverts() public {
         uint256 amountIn = 1e18;
         uint256 minAmountOut = 1800e6;
