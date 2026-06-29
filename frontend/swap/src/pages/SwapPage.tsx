@@ -169,6 +169,7 @@ export default function SwapPage() {
   const quote = useSwapStore((s) => s.quote)
   const quoteExpiry = useSwapStore((s) => s.quoteExpiry)
   const activeOrder = useSwapStore((s) => s.activeOrder)
+  const orderStalled = useSwapStore((s) => s.orderStalled)
   const executionDetails = useSwapStore((s) => s.executionDetails)
   const showDebug = useSwapStore((s) => s.showDebug)
   const tokenSelectorOpen = useSwapStore((s) => s.tokenSelectorOpen)
@@ -496,6 +497,7 @@ export default function SwapPage() {
             const { isFilled } = classifyOrderStatus(activeOrder.status)
             const onNewSwap = () => {
               useSwapStore.getState().setActiveOrder(null)
+              useSwapStore.getState().setOrderStalled(false)
               useSwapStore.getState().setInputAmount('')
               setFlowStep('form')
             }
@@ -527,6 +529,7 @@ export default function SwapPage() {
                 fee={executionDetails?.fee}
                 gas={executionDetails?.gasUsed}
                 errorMessage={(activeOrder as Record<string, unknown>).error as string | undefined}
+                stalled={orderStalled}
                 explorerBaseUrl={CHAIN_CONFIG[chainId]?.explorer ?? ''}
                 onNewSwap={onNewSwap}
               />

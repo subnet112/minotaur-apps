@@ -73,6 +73,11 @@ interface SwapState {
 
   // Order
   activeOrder: OrderResult | null
+  // Client-side stall flag: set when the active order sat in a non-terminal
+  // state past ORDER_STALL_TIMEOUT_MS without progressing (e.g. validators
+  // never scored it). The raw activeOrder.status is preserved so the card can
+  // still show how far it got; this flag flips it to a failed treatment.
+  orderStalled: boolean
   executionDetails: {
     amountIn: string; amountOut: string; fee: string
     surplus: string; tokenIn: string; tokenOut: string; gasUsed?: string
@@ -145,6 +150,7 @@ interface SwapActions {
 
   // Order
   setActiveOrder: (order: OrderResult | null) => void
+  setOrderStalled: (stalled: boolean) => void
   setExecutionDetails: (details: { amountIn: string; amountOut: string; fee: string; surplus: string; tokenIn: string; tokenOut: string; gasUsed?: string } | null) => void
 
   // Approval
@@ -215,6 +221,7 @@ const initialState: SwapState = {
   quoteExpiry: null,
 
   activeOrder: null,
+  orderStalled: false,
   executionDetails: null,
 
   needsApproval: false,
@@ -311,6 +318,7 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
 
   // Order
   setActiveOrder: (order) => set({ activeOrder: order, executionDetails: order ? undefined : null }),
+  setOrderStalled: (stalled) => set({ orderStalled: stalled }),
   setExecutionDetails: (details) => set({ executionDetails: details }),
 
   // Approval
