@@ -67,35 +67,17 @@ contract DeployAndWireDexAggregatorTest is Test {
         vm.setEnv("APP_PAYMASTER", vm.toString(deployer)); // == deployer
     }
 
-    function test_freshDeploy_comesOutFullyWired() public {
-        _baseEnv();
-        address app = script.run();
-        assertTrue(app != address(0), "no contract deployed");
-
-        // 1. Intents registered by the constructor.
-        assertTrue(
-            DexAggregatorApp(payable(app)).registeredIntents(SWAP_SEL),
-            "SWAP intent not registered"
-        );
-
-        // 2. Mapped in the AppRegistry under the supplied appId.
-        assertEq(appReg.appByContract(app), APP_ID, "AppRegistry mapping missing");
-
-        // 3. Protocol-fee WETH approval granted from the paymaster (== deployer).
-        assertGe(
-            weth.allowance(deployer, app),
-            MAX_FEE,
-            "WETH fee approval missing/insufficient (the prod-outage gap)"
-        );
-
-        // Sanity: the relayer baked into the immutable is the deployer.
-        assertEq(DexAggregatorApp(payable(app)).relayer(), deployer, "relayer != deployer");
-    }
-
-    function test_failsLoud_whenPaymasterIsNotDeployer() public {
-        // If the fee paymaster isn't the deployer, the script can't grant the
-        // WETH approval in its own broadcast — it must revert up front rather
-        // than ship a contract that reverts on fee settlement.
+    /// @dev Both halves mutate the process-global `APP_PAYMASTER` via
+    ///      `vm.setEnv`, which forge does NOT roll back AND which races across
+    ///      forge's parallel test execution (these previously lived in two
+    ///      functions and flaked ~75% of runs as the two threads clobbered each
+    ///      other's APP_PAYMASTER). Running both halves sequentially inside ONE
+    ///      function removes the race entirely.
+    function test_deployScript_paymasterGuard_thenFullyWires() public {
+        // Part 1 — fail loud: if the fee paymaster isn't the deployer, the
+        // script can't grant the WETH approval in its own broadcast, so it must
+        // revert up front (pre-broadcast) rather than ship a contract that
+        // reverts on fee settlement.
         _baseEnv();
         vm.setEnv("APP_PAYMASTER", vm.toString(makeAddr("otherPaymaster")));
         vm.expectRevert(
@@ -104,5 +86,29 @@ contract DeployAndWireDexAggregatorTest is Test {
             )
         );
         script.run();
+
+        // Part 2 — happy path: deployer == paymaster ⇒ fully wired deploy.
+        _baseEnv(); // resets APP_PAYMASTER back to deployer
+        address app = script.run();
+        assertTrue(app != address(0), "no contract deployed");
+
+        // a. Intents registered by the constructor.
+        assertTrue(
+            DexAggregatorApp(payable(app)).registeredIntents(SWAP_SEL),
+            "SWAP intent not registered"
+        );
+
+        // b. Mapped in the AppRegistry under the supplied appId.
+        assertEq(appReg.appByContract(app), APP_ID, "AppRegistry mapping missing");
+
+        // c. Protocol-fee WETH approval granted from the paymaster (== deployer).
+        assertGe(
+            weth.allowance(deployer, app),
+            MAX_FEE,
+            "WETH fee approval missing/insufficient (the prod-outage gap)"
+        );
+
+        // d. Sanity: the relayer baked into the immutable is the deployer.
+        assertEq(DexAggregatorApp(payable(app)).relayer(), deployer, "relayer != deployer");
     }
 }
