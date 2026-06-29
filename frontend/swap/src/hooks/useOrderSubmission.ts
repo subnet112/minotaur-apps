@@ -3,7 +3,7 @@ import { useToast } from '@/components/shell'
 import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID, TOKENS } from '@/config/chains'
 import { formatAmount, shorten } from '../utils'
-import { classifyOrderStatus } from '@/lib/orderStatus'
+import { classifyOrderStatus, isOrderStalled } from '@/lib/orderStatus'
 import * as api from '@/api/client'
 import { useWalletClient, usePublicClient } from 'wagmi'
 import { keccak256, toBytes, type Address } from 'viem'
@@ -15,17 +15,29 @@ export function useOrderSubmission() {
   const toast = useToast()
   const store = useSwapStore()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Tracks the last observed status + when it last changed, so we can detect an
+  // order that stops progressing (e.g. validators never score a 'solved' order).
+  const lastChangeRef = useRef<{ status: string; at: number }>({ status: '', at: 0 })
   const { data: walletClient } = useWalletClient()
   const publicClient = usePublicClient()
 
   const pollOrderStatus = useCallback((orderId: string) => {
     if (pollRef.current) clearInterval(pollRef.current)
     store.setPolling(true)
+    store.setOrderStalled(false)
+    // Reset the stall clock; the first tick stamps the initial status.
+    lastChangeRef.current = { status: '', at: Date.now() }
 
     pollRef.current = setInterval(async () => {
       try {
         const status = await api.getOrderStatus(orderId)
         store.setActiveOrder(status)
+
+        // Track status-change time for stall detection (below).
+        const now = Date.now()
+        if (lastChangeRef.current.status !== status.status) {
+          lastChangeRef.current = { status: status.status, at: now }
+        }
 
         // Keep the matching history row in sync so the RevealPanel shows
         // the order's *current* state instead of whatever it was at submit
@@ -136,6 +148,23 @@ export function useOrderSubmission() {
               message: reason || 'See order receipt for details',
             })
           }
+        } else if (isOrderStalled(status.status, now - lastChangeRef.current.at)) {
+          // The order stopped progressing in a non-terminal state — almost
+          // always validators failing to score a 'solved' order, which the
+          // backend has no status for. Stop polling and flip the card to a
+          // failed treatment so the user isn't left staring at a frozen
+          // stepper. No funds moved (it never reached fill).
+          clearInterval(pollRef.current!)
+          pollRef.current = null
+          store.setPolling(false)
+          store.setOrderStalled(true)
+          // Reflect it in history too (badge → failed); the raw activeOrder
+          // status is kept intact so the card still shows the reached stage.
+          store.updateHistoryItem(orderId, { status: 'stalled' })
+          toast.error({
+            title: 'Order stalled',
+            message: 'Validators did not score this order in time — it was not filled. You can safely retry.',
+          })
         }
       } catch {
         // Polling errors are transient -- keep trying
