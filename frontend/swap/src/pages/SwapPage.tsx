@@ -524,6 +524,7 @@ export default function SwapPage() {
                 orderId={activeOrder.order_id}
                 txHash={activeOrder.tx_hash ?? undefined}
                 score={activeOrder.score ?? undefined}
+                onChainScore={(activeOrder as Record<string, unknown>).on_chain_score as number | null | undefined}
                 output={executionDetails?.amountOut}
                 surplus={executionDetails?.surplus}
                 fee={executionDetails?.fee}

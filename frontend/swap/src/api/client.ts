@@ -334,7 +334,12 @@ export interface OrderResult {
   intent_function: string
   params: Record<string, unknown>
   plan: Record<string, unknown> | null
+  /** Post relative-cutover: a 0/1 VALIDITY SENTINEL (1.0 = valid plan), NOT a
+   *  quality grade. Render as pass/fail, never as a percentage. */
   score: number | null
+  /** Contract `scoreIntent` result in BPS (0–10000) — the real delivered-quality
+   *  signal; percent = /100. Null when not scored on-chain. */
+  on_chain_score?: number | null
   tx_hash: string | null
   chain_id: number
   [k: string]: unknown
