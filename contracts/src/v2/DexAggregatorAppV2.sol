@@ -40,6 +40,15 @@ contract DexAggregatorAppV2 is AppIntentBaseV2 {
     // ── State ──────────────────────────────────────────────────────────────
 
     uint256 public feeBps;
+
+    /// @notice The app developer/owner. May recover the WETH fee float
+    ///         independently of the relayer (their money, their exit) — the
+    ///         float model must not make developers custodially dependent on
+    ///         the relayer for a version migration. NOT a constructor arg so
+    ///         V2 stays argument-compatible with existing deploy tooling:
+    ///         the relayer bootstraps it once via setAppOwner, after which
+    ///         the owner can rotate it without the relayer.
+    address public appOwner;
     uint256 public volumeCapBps;
     uint256 public constant DEFAULT_VOLUME_CAP_BPS = 98;
     address public feeCollector;
@@ -60,6 +69,7 @@ contract DexAggregatorAppV2 is AppIntentBaseV2 {
     event FeeBpsUpdated(uint256 newFeeBps);
     event VolumeCapBpsUpdated(uint256 newVolumeCapBps);
     event FloatWithdrawn(address indexed to, uint256 amount);
+    event AppOwnerUpdated(address indexed newOwner);
 
     // ── Constructor ────────────────────────────────────────────────────────
 
@@ -99,6 +109,24 @@ contract DexAggregatorAppV2 is AppIntentBaseV2 {
 
     // ── Admin ──────────────────────────────────────────────────────────────
 
+    modifier onlyRelayerOrAppOwner() {
+        require(
+            msg.sender == relayer
+                || (appOwner != address(0) && msg.sender == appOwner),
+            "Not relayer or app owner"
+        );
+        _;
+    }
+
+    /// @notice Bootstrap or rotate the app owner. Relayer sets it initially
+    ///         (constructor compatibility — see appOwner docs); afterwards
+    ///         the owner can hand it over themselves.
+    function setAppOwner(address _appOwner) external onlyRelayerOrAppOwner {
+        require(_appOwner != address(0), "Invalid app owner");
+        appOwner = _appOwner;
+        emit AppOwnerUpdated(_appOwner);
+    }
+
     function setFeeCollector(address _feeCollector) external onlyRelayer {
         require(_feeCollector != address(0), "Invalid fee collector");
         feeCollector = _feeCollector;
@@ -120,7 +148,10 @@ contract DexAggregatorAppV2 is AppIntentBaseV2 {
     /// @notice V2: recover WETH float parked on this contract for protocol
     ///         fees. Safe to call between orders — mid-order the base's fee
     ///         verification would revert the swap if the float goes missing.
-    function withdrawFloat(address to, uint256 amount) external onlyRelayer {
+    ///         Callable by the relayer OR the app owner: the float is the
+    ///         app funder's money, and migrating to a new contract version
+    ///         must not require the relayer's cooperation to exit.
+    function withdrawFloat(address to, uint256 amount) external onlyRelayerOrAppOwner {
         require(to != address(0), "Invalid recipient");
         wrappedNativeToken.safeTransfer(to, amount);
         emit FloatWithdrawn(to, amount);
