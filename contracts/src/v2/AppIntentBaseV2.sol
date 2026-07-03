@@ -279,6 +279,20 @@ abstract contract AppIntentBaseV2 is IAppIntentBase, ReentrancyGuardTransient {
         _executeLegInternal(order, plan, legIndex, userSignature, validatorSignatures);
     }
 
+    /// @notice Deprecated: use executeLeg instead. Retained so V2 is a
+    ///         drop-in for the current relayer, which still submits
+    ///         destination legs through this selector (minotaur_subnet
+    ///         evm_relayer/chain_config).
+    function executeCrossChainLeg(
+        IntentOrder calldata order,
+        ExecutionPlan calldata plan,
+        uint256 legIndex,
+        bytes calldata userSignature,
+        bytes[] calldata validatorSignatures
+    ) external payable nonReentrant {
+        _executeLegInternal(order, plan, legIndex, userSignature, validatorSignatures);
+    }
+
     function _executeLegInternal(
         IntentOrder calldata order,
         ExecutionPlan calldata plan,
