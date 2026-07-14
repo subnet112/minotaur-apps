@@ -14,13 +14,17 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useSwapStore } from '@/store'
-import { useAppBootstrap } from '@/hooks/useAppBootstrap'
+import { useAppBootstrap, CONFIGURED_APP_ID } from '@/hooks/useAppBootstrap'
 import * as api from '@/api/client'
 import { HookWrapper, resetStore } from './test-utils'
 
 // ── Test constants ───────────────────────────────────────────────────────────
 
 const BASE_CHAIN_ID = 8453  // DEFAULT_CHAIN_ID from config/chains.ts
+
+// The UI serves exactly the CONFIGURED app (VITE_APP_ID, default V2) — never
+// the list head — so mocks must list that id for it to be chosen.
+const APP_ID = CONFIGURED_APP_ID
 
 const MOCK_SOLVER_TOKENS_RESPONSE = {
   chain_id: BASE_CHAIN_ID,
@@ -34,7 +38,7 @@ const MOCK_SOLVER_TOKENS_RESPONSE = {
 const MOCK_APPS_RESPONSE = {
   apps: [
     {
-      app_id: 'dex-app-mainnet-001',
+      app_id: APP_ID,
       name: 'DexAggregatorApp',
       description: 'Test app',
       supported_chains: [BASE_CHAIN_ID],
@@ -45,7 +49,7 @@ const MOCK_APPS_RESPONSE = {
 }
 
 const MOCK_APP_STATUS = {
-  app_id: 'dex-app-mainnet-001',
+  app_id: APP_ID,
   deployments: {
     base: {
       contract_address: '0xContractOnBase',
@@ -243,7 +247,7 @@ describe('useAppBootstrap', () => {
       expect(useSwapStore.getState().appLoaded).toBe(true)
     })
 
-    expect(useSwapStore.getState().appId).toBe('dex-app-mainnet-001')
+    expect(useSwapStore.getState().appId).toBe(APP_ID)
   })
 
   // ── Deployment selection ───────────────────────────────────────────────────
@@ -415,18 +419,39 @@ describe('useAppBootstrap', () => {
     })
   })
 
-  it('does not set appLoaded when listApps returns empty apps array', async () => {
+  it('fails loud (no appId, store.error set) when listApps returns empty apps array', async () => {
     vi.spyOn(api, 'getChainTokens').mockResolvedValue(MOCK_SOLVER_TOKENS_RESPONSE)
     vi.spyOn(api, 'listApps').mockResolvedValue({ apps: [] })
 
     renderHook(() => useAppBootstrap(), { wrapper: HookWrapper })
 
     await waitFor(() => {
-      expect(useSwapStore.getState().solverTokens[BASE_CHAIN_ID]).toBeDefined()
+      expect(useSwapStore.getState().error).toBeTruthy()
     })
 
-    expect(useSwapStore.getState().appLoaded).toBe(false)
+    // Configured app absent → never fall back to another app.
     expect(useSwapStore.getState().appId).toBe('')
+    expect(useSwapStore.getState().error).toContain(CONFIGURED_APP_ID)
+  })
+
+  it('fails loud when the configured app is not among the listed apps', async () => {
+    vi.spyOn(api, 'getChainTokens').mockResolvedValue(MOCK_SOLVER_TOKENS_RESPONSE)
+    vi.spyOn(api, 'listApps').mockResolvedValue({
+      apps: [
+        { app_id: 'some-other-app', name: 'Other', description: '', supported_chains: [BASE_CHAIN_ID], deployer: '0x0', status: 'active' },
+      ],
+    })
+    const getAppStatusSpy = vi.spyOn(api, 'getAppStatus')
+
+    renderHook(() => useAppBootstrap(), { wrapper: HookWrapper })
+
+    await waitFor(() => {
+      expect(useSwapStore.getState().error).toBeTruthy()
+    })
+
+    // Never selects the list head, never fetches its status.
+    expect(useSwapStore.getState().appId).toBe('')
+    expect(getAppStatusSpy).not.toHaveBeenCalled()
   })
 
   // ── Unmount / cleanup ──────────────────────────────────────────────────────

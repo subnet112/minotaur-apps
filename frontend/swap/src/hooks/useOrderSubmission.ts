@@ -80,9 +80,15 @@ export function useOrderSubmission() {
                   : '0x' + status.tx_hash) as `0x${string}`
                 const receipt = await publicClient.getTransactionReceipt({ hash: txHash })
                 if (receipt) {
-                  // SwapExecuted event ABI — keep in sync with contracts/src/DexAggregatorApp.sol:
-                  //   event SwapExecuted(bytes32 indexed orderId, address tokenIn, address tokenOut,
+                  // SwapExecuted event ABI — IDENTICAL in V1 and V2:
+                  //   event SwapExecuted(bytes32 indexed orderId, address indexed user,
+                  //     address tokenIn, address tokenOut,
                   //     uint256 amountIn, uint256 amountOut, uint256 fee)
+                  // Two indexed fields (orderId, user) live in topics[1..2]; the
+                  // 5 non-indexed fields below live in `data`. `amountOut` is the
+                  // gross swap output (`gained`); under V2 the contract keeps
+                  // `fee` (its share of positive slippage) and delivers
+                  // `amountOut - fee` to the user.
                   const swapTopic = keccak256(toBytes(
                     'SwapExecuted(bytes32,address,address,address,uint256,uint256,uint256)'
                   ))
@@ -114,15 +120,28 @@ export function useOrderSubmission() {
                     const inMeta = tokens.find((t) => t.address.toLowerCase() === tokenIn.toLowerCase())
                     const outMeta = tokens.find((t) => t.address.toLowerCase() === tokenOut.toLowerCase())
                     const inDec = inMeta?.decimals ?? 18
-                    const outDec = outMeta?.decimals ?? 18
+                    // When the user chose the NATIVE asset as output, the
+                    // contract unwraps WETH→ETH and delivers native — so label
+                    // the breakdown with the native symbol/decimals the user
+                    // actually received, not the wrapped token the event carries.
+                    const deliveredNative = !!store.outputToken?.native
+                    const outDec = deliveredNative ? (store.outputToken?.decimals ?? 18) : (outMeta?.decimals ?? 18)
                     const inSym = inMeta?.symbol ?? shorten(tokenIn, 4)
-                    const outSym = outMeta?.symbol ?? shorten(tokenOut, 4)
+                    const outSym = deliveredNative
+                      ? (store.outputToken?.symbol ?? outMeta?.symbol ?? shorten(tokenOut, 4))
+                      : (outMeta?.symbol ?? shorten(tokenOut, 4))
                     const fmt = (wei: bigint, dec: number, sym: string) =>
                       `${formatAmount(wei.toString(), dec, 6)} ${sym}`
 
+                    // V2 surplus-fee model: the contract keeps `fee` (its share
+                    // of positive slippage) out of the gross output and delivers
+                    // `amountOut - fee` to the user. Show the delivered amount as
+                    // the output so it matches the user's wallet, not the gross.
+                    const receivedWei = amountOut > fee ? amountOut - fee : amountOut
+
                     store.setExecutionDetails({
                       amountIn: fmt(amountIn, inDec, inSym),
-                      amountOut: fmt(amountOut, outDec, outSym),
+                      amountOut: fmt(receivedWei, outDec, outSym),
                       fee: fmt(fee, outDec, outSym),
                       surplus: surplusWei > 0n ? fmt(surplusWei, outDec, outSym) : '0',
                       tokenIn: tokenIn,
@@ -210,6 +229,14 @@ export function useOrderSubmission() {
 
     try {
       const orderParams = { ...store.quote.ready_params }
+
+      // V2 unwrap_output — mirror the output-token choice into the order the
+      // validator encodes+signs: native output (ETH/TAO) → deliver unwrapped;
+      // explicit WETH → keep wrapped. (Ignored by the contract for non-native
+      // outputs.) Leave Bittensor stake params untouched.
+      if (!orderParams.action) {
+        orderParams.unwrap_output = !!store.outputToken?.native
+      }
 
       // Cross-chain EVM->EVM: ensure dest_chain_id is in order params
       if (store.isCrossChain && store.sourceChainId !== BITTENSOR_CHAIN_ID) {

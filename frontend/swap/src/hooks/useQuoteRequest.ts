@@ -49,6 +49,12 @@ export function useQuoteRequest() {
         input_token: inputInterop,
         output_token: outputInterop,
         input_amount: inputAmountWei,
+        // V2 unwrap_output: when the user picks the NATIVE asset (ETH/TAO) as
+        // output we quote against the wrapped token but ask the contract to
+        // unwrap and deliver native; when they pick WETH explicitly we keep it
+        // wrapped. Harmless for non-native outputs (the contract only unwraps
+        // when tokenOut == wrappedNative). Default per manifest is true.
+        unwrap_output: !!store.outputToken.native,
       }
 
       // Bittensor source: inject substrate-specific params

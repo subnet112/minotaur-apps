@@ -646,7 +646,7 @@ function makeCustomImportHandler(
         import('viem'),
         import('@/config/wagmi'),
       ])
-      const client = getPublicClient(wagmiConfig, { chainId: chainId as 8453 })
+      const client = getPublicClient(wagmiConfig, { chainId: chainId as 8453 | 1 })
       if (!client) return null
 
       const tokenAddr = getAddress(addr) as `0x${string}`
