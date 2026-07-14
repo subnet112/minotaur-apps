@@ -2,9 +2,9 @@ import { useCallback, useEffect } from 'react'
 import { useSwapStore } from '../store'
 import { useToast } from '@/components/shell'
 import { useWalletClient, usePublicClient, useSwitchChain } from 'wagmi'
-import { base } from 'wagmi/chains'
 import { erc20Abi, maxUint256, type Address } from 'viem'
 import { CHAIN_CONFIG } from '@/config/chains'
+import { wagmiChainById } from '@/config/wagmi'
 
 /**
  * ERC-20 approval glue:
@@ -110,7 +110,7 @@ export function useApproval() {
     store.setApproving(true)
     try {
       const txHash = await walletClient.writeContract({
-        chain: base,
+        chain: wagmiChainById(store.chainId),
         address: tokenAddr,
         abi: erc20Abi,
         functionName: 'approve',

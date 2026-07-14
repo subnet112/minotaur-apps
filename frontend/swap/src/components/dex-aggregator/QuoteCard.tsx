@@ -84,7 +84,7 @@ export default function QuoteCard({ quote }: QuoteCardProps) {
               <span className="v">{quote.gasUsd}</span>
             </div>
             <div className="row">
-              <span className="k">Fee</span>
+              <span className="k" title="Protocol fee, denominated in the wrapped native token. Under the V2 app-fee model this is paid by the app from its own float — it is not pulled from your swap. Your effective cost shows up in the output/surplus split, not as a charge on top.">Protocol fee</span>
               <span className="v">{quote.feeUsd}</span>
             </div>
             <div className="row is-route">

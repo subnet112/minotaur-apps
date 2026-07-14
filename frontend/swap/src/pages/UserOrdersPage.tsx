@@ -27,6 +27,7 @@ export default function UserOrdersPage() {
   const walletAddress = useSwapStore((s) => s.walletAddress)
   const walletConnected = useSwapStore((s) => s.walletConnected)
   const solverTokens = useSwapStore((s) => s.solverTokens)
+  const appId = useSwapStore((s) => s.appId)
 
   const [orders, setOrders] = useState<OrderResult[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,18 +54,21 @@ export default function UserOrdersPage() {
     return () => window.clearInterval(id)
   }, [fetchOrders])
 
-  // Filter to the connected wallet, newest first.
+  // Filter to the connected wallet AND the app this UI serves (so V1/V2 orders
+  // don't interleave once both are live), newest first. The per-row chain badge
+  // then distinguishes Base vs Ethereum within the active app.
   const myOrders = useMemo(() => {
     if (!walletAddress) return []
     const addr = walletAddress.toLowerCase()
     return orders
       .filter((o) => o.submitted_by?.toLowerCase() === addr)
+      .filter((o) => !appId || o.app_id === appId)
       .sort((a, b) => {
         const at = Number(a.created_at) || 0
         const bt = Number(b.created_at) || 0
         return bt - at
       })
-  }, [orders, walletAddress])
+  }, [orders, walletAddress, appId])
 
   return (
     <section className="dex-stage" aria-label="My orders">
@@ -130,7 +134,7 @@ interface OrderRowProps {
 }
 
 function OrderRow({ order, solverTokens }: OrderRowProps) {
-  const chainCfg = CHAIN_CONFIG[order.chain_id as 8453]
+  const chainCfg = CHAIN_CONFIG[order.chain_id]
   const params = (order.params ?? {}) as Record<string, unknown>
   const inAddr = String(params.input_token ?? '')
   const outAddr = String(params.output_token ?? '')
@@ -154,6 +158,13 @@ function OrderRow({ order, solverTokens }: OrderRowProps) {
         <span className="sym">{inSym}</span>
         <span className="arrow" aria-hidden="true">→</span>
         <span className="sym">{outSym}</span>
+        <span
+          className="uord-chain mono"
+          title={chainCfg?.name ?? `chain ${order.chain_id}`}
+          style={{ marginLeft: 8, padding: '1px 6px', border: '1px solid var(--hairline, rgba(255,255,255,0.14))', borderRadius: 4, fontSize: 10, opacity: 0.75 }}
+        >
+          {chainCfg?.shortName ?? order.chain_id}
+        </span>
       </span>
       <span role="cell" className="mono uord-tx">
         {order.tx_hash && chainCfg?.explorer ? (

@@ -361,8 +361,10 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
         import('viem'),
         import('@/config/wagmi'),
       ])
-      // Base-only config → getPublicClient's chainId narrows to the literal 8453.
-      const client = getPublicClient(wagmiConfig, { chainId: s.chainId as 8453 })
+      // getPublicClient narrows chainId to the union of configured chains
+      // (Base 8453 + Ethereum 1). store.chainId is snapped to a supported
+      // deployment chain at bootstrap, so this cast is safe at runtime.
+      const client = getPublicClient(wagmiConfig, { chainId: s.chainId as 8453 | 1 })
       if (!client) { set({ needsApproval: false, needsWrap: false }); return }
       const want = BigInt(String(amount))
       // Native input: does the user hold enough WETH yet, or must they wrap?

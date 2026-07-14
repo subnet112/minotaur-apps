@@ -2,9 +2,9 @@ import { useCallback } from 'react'
 import { useSwapStore } from '../store'
 import { useToast } from '@/components/shell'
 import { useWalletClient, usePublicClient, useSwitchChain } from 'wagmi'
-import { base } from 'wagmi/chains'
 import { type Address } from 'viem'
 import { CHAIN_CONFIG } from '@/config/chains'
+import { wagmiChainById } from '@/config/wagmi'
 
 /**
  * Native-ETH wrap glue.
@@ -78,7 +78,7 @@ export function useWrap() {
       // for gas (the wrap + approve txs they sign).
       const amount = BigInt(String(amountStr))
       const txHash = await walletClient.writeContract({
-        chain: base,
+        chain: wagmiChainById(store.chainId),
         address: weth,
         abi: WETH_DEPOSIT_ABI,
         functionName: 'deposit',
