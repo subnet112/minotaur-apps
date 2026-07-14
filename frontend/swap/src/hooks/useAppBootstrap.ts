@@ -5,6 +5,19 @@ import type { Token } from '../types'
 import * as api from '@/api/client'
 
 /**
+ * The App Intent this UI serves. The validator can list several apps (V1 and
+ * V2 DexAggregator during the migration); we serve exactly ONE, chosen
+ * explicitly — never `apps[0]` — so which app is served is deterministic.
+ *
+ * Configure with `VITE_APP_ID`; defaults to the DEX Aggregator V2 app
+ * (Base + Ethereum). A configured id that the validator doesn't list is a
+ * hard error (surfaced to the user) — we never silently fall back to another
+ * app, which would swap against the wrong contract.
+ */
+export const CONFIGURED_APP_ID: string =
+  (import.meta.env.VITE_APP_ID as string | undefined)?.trim() || 'app_0867cdd4effd'
+
+/**
  * Bootstrap hook: loads history, fetches solver tokens, discovers apps/contracts.
  * Runs once on mount.
  */
@@ -68,8 +81,22 @@ export function useAppBootstrap() {
     const ORDER_READY = new Set(['solved', 'active'])
     api.listApps().then(async (res) => {
       const apps = res.apps || []
-      if (apps.length > 0) {
-        const appId = apps[0].app_id
+      // Serve the CONFIGURED app explicitly — not the list head. If the
+      // validator doesn't list it, fail loud rather than swapping against
+      // whatever app happens to come first.
+      const chosen = apps.find((a) => a.app_id === CONFIGURED_APP_ID)
+      if (!chosen) {
+        const available = apps.map((a) => a.app_id).join(', ') || '(none)'
+        const msg =
+          `Configured app "${CONFIGURED_APP_ID}" is not served by the validator ` +
+          `(available: ${available}). Set VITE_APP_ID to a listed app.`
+        console.error('[swap]', msg)
+        store.setError(msg)
+        store.setAppLoaded(true)
+        return
+      }
+      {
+        const appId = chosen.app_id
         store.setAppId(appId)
         store.setAppLoaded(true)
         try {

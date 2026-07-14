@@ -15,17 +15,28 @@ import {
   walletConnectWallet,
 } from '@rainbow-me/rainbowkit/wallets'
 import { createConfig, http } from 'wagmi'
-import { base } from 'wagmi/chains'
+import { base, mainnet } from 'wagmi/chains'
+import type { Chain } from 'viem'
 
-const PUBLIC_RPC_BASE = 'https://mainnet.base.org'
+// Public fallbacks; override with a real RPC (Alchemy/Infura) via env for
+// reliability — Ethereum mainnet especially benefits from a dedicated endpoint.
+const PUBLIC_RPC_BASE =
+  (import.meta.env.VITE_BASE_RPC_URL as string | undefined)?.trim() || 'https://mainnet.base.org'
+const PUBLIC_RPC_ETH =
+  (import.meta.env.VITE_ETH_RPC_URL as string | undefined)?.trim() || 'https://eth.llamarpc.com'
 
 // ──────────────────────────────────────────────────────────────────────
-// Chain list. Should match the DexAggregator's deployed chains. Today
-// that's Base only. When a new deployment lands on
+// Chain list. Should match the DexAggregator's deployed chains. V2 is on
+// Base (8453) + Ethereum mainnet (1). When a new deployment lands on
 // /v1/apps/{id}/status.deployments, add the corresponding wagmi chain
 // entry here AND a transport below.
 // ──────────────────────────────────────────────────────────────────────
-const chains = [base] as const
+const chains = [base, mainnet] as const
+
+/** Resolve the wagmi Chain object for a chain id (for writeContract's `chain`). */
+export function wagmiChainById(chainId: number): Chain | undefined {
+  return chains.find((c) => c.id === chainId)
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // Wallet connectors.
@@ -77,6 +88,7 @@ export const wagmiConfig = createConfig({
   connectors,
   transports: {
     [base.id]: http(PUBLIC_RPC_BASE),
+    [mainnet.id]: http(PUBLIC_RPC_ETH),
   },
   ssr: false,
 })

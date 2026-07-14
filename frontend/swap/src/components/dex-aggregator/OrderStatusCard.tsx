@@ -211,19 +211,19 @@ export default function OrderStatusCard({
             </span>
           </div>
           <div className="row">
-            <span className="k">Output</span>
+            <span className="k" title="Amount delivered to you — the gross swap output minus the app's surplus fee below.">Output</span>
             <span className={`v ${showOutput ? '' : 'dim'}`.trim()}>
               {showOutput && output ? output : '—'}
             </span>
           </div>
           <div className="row">
-            <span className="k">Surplus</span>
+            <span className="k" title="Positive slippage: how much the swap beat your minimum output.">Surplus</span>
             <span className={`v ${showSurplus ? 'lime' : 'dim'}`.trim()}>
               {showSurplus && surplus ? `+${surplus}` : '—'}
             </span>
           </div>
           <div className="row">
-            <span className="k">Fee</span>
+            <span className="k" title="App fee (V2): the app's share of the surplus above your quote — taken from the output, not charged on top. The protocol fee is paid separately by the app, not by you.">App fee</span>
             <span className={`v ${showFee ? '' : 'dim'}`.trim()}>
               {showFee && fee ? fee : '—'}
             </span>
