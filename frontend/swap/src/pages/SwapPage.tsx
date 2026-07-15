@@ -183,6 +183,8 @@ export default function SwapPage() {
   const setShowSettings = useSwapStore((s) => s.setShowSettings)
   const setShowDebug = useSwapStore((s) => s.setShowDebug)
   const swapTokens = useSwapStore((s) => s.swapTokens)
+  const setActiveChain = useSwapStore((s) => s.setActiveChain)
+  const setChainId = useSwapStore((s) => s.setChainId)
   const sourceChainId = useSwapStore((s) => s.sourceChainId)
   const chainId = useSwapStore((s) => s.chainId)
   const inputBalance = useSwapStore((s) => s.inputBalance)
@@ -439,8 +441,16 @@ export default function SwapPage() {
                 const bal = useSwapStore.getState().inputBalance
                 if (bal && bal !== '0') useSwapStore.getState().setInputAmount(bal)
               }}
-              onPickFromChain={(id) => { useSwapStore.getState().setSourceChainId(id); void wallet.switchChain(id) }}
-              onPickToChain={(id) => { useSwapStore.setState({ chainId: id }); void wallet.switchChain(id) }}
+              onPickFromChain={(id) => {
+                // Cross-chain swaps are not available yet, so the visible
+                // picker always changes both sides of a same-chain swap.
+                setActiveChain(id)
+                void wallet.switchChain(id)
+              }}
+              onPickToChain={(id) => {
+                setChainId(id)
+                void wallet.switchChain(id)
+              }}
               showRecipient={isCrossChain && walletMode === 'bittensor'}
               recipientValid={
                 isCrossChain && walletMode === 'bittensor'

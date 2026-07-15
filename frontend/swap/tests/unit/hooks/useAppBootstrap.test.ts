@@ -317,6 +317,31 @@ describe('useAppBootstrap', () => {
     expect(useSwapStore.getState().contractAddress).toBe('0xContractOnBase')
   })
 
+  it('only exposes the V2 Base and Ethereum deployments', async () => {
+    vi.spyOn(api, 'listApps').mockResolvedValue(MOCK_APPS_RESPONSE)
+    vi.spyOn(api, 'getAppStatus').mockResolvedValue({
+      app_id: APP_ID,
+      deployments: {
+        mainnet: { contract_address: '0xContractOnMainnet', chain_id: 1, status: 'active' },
+        base: { contract_address: '0xContractOnBase', chain_id: 8453, status: 'solved' },
+        bittensorEvm: { contract_address: '0xContractOnBtEvm', chain_id: 964, status: 'active' },
+        bittensor: { contract_address: '0xContractOnBt', chain_id: 0, status: 'active' },
+      },
+    } as any)
+    vi.spyOn(api, 'getChainTokens').mockResolvedValue(MOCK_SOLVER_TOKENS_RESPONSE)
+
+    renderHook(() => useAppBootstrap(), { wrapper: HookWrapper })
+
+    await waitFor(() => {
+      expect(useSwapStore.getState().appSupportedChains).toEqual([1, 8453])
+    })
+
+    expect(useSwapStore.getState().appContracts).toEqual({
+      1: '0xContractOnMainnet',
+      8453: '0xContractOnBase',
+    })
+  })
+
   it('uses legacy top-level contract_address when deployments have none', async () => {
     vi.spyOn(api, 'listApps').mockResolvedValue(MOCK_APPS_RESPONSE)
     vi.spyOn(api, 'getAppStatus').mockResolvedValue({

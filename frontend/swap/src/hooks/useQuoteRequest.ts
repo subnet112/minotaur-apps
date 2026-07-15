@@ -230,6 +230,8 @@ export function useQuoteRequest() {
     store.inputAmount,
     store.walletAddress,
     store.chainId,
+    store.sourceChainId,
+    store.isCrossChain,
     store.appId,
   ])
 

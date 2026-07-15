@@ -36,6 +36,12 @@ export interface Token {
 
 export const SUPPORTED_CHAIN_IDS = [1, 8453, 964] as const
 
+/** Networks where the deployed DEX Aggregator V2 is allowed to operate.
+ * This is intentionally narrower than CHAIN_CONFIG: the catalog retains
+ * Bittensor networks for the future cross-chain flow, while the current
+ * single-chain swap UI only exposes its EVM deployments. */
+export const DEX_DEPLOYED_EVM_CHAIN_IDS = [1, 8453] as const
+
 // Bittensor chain ID (virtual — substrate, not EVM)
 export const BITTENSOR_CHAIN_ID = 0
 

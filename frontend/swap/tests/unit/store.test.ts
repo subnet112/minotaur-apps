@@ -37,6 +37,31 @@ describe('useSwapStore', () => {
     expect(useSwapStore.getState().quote).toBeNull()
   })
 
+  it('setActiveChain keeps a swap on one chain and clears stale state', () => {
+    useSwapStore.setState({
+      chainId: 8453,
+      sourceChainId: 8453,
+      isCrossChain: false,
+      inputAmount: '10',
+      quote: { foo: 1 } as any,
+      evmRecipient: '0x123',
+      showDestNetworkSelector: true,
+    })
+
+    useSwapStore.getState().setActiveChain(1)
+
+    const state = useSwapStore.getState()
+    expect(state.chainId).toBe(1)
+    expect(state.sourceChainId).toBe(1)
+    expect(state.isCrossChain).toBe(false)
+    expect(state.inputToken?.symbol).toBe('USDC')
+    expect(state.outputToken?.symbol).toBe('WETH')
+    expect(state.inputAmount).toBe('')
+    expect(state.quote).toBeNull()
+    expect(state.evmRecipient).toBe('')
+    expect(state.showDestNetworkSelector).toBe(false)
+  })
+
   it('swapTokens flips input/output and clears amount', () => {
     const tokenA = { symbol: 'A', address: '0xa', decimals: 18 }
     const tokenB = { symbol: 'B', address: '0xb', decimals: 18 }
