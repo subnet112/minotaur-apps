@@ -46,6 +46,7 @@ interface SwapState {
   appId: string
   appLoaded: boolean
   contractAddress: string  // on-chain contract for ERC-20 approvals
+  appContracts: Record<number, string>
   unlimitedApproval: boolean
   slippageBps: number      // slippage tolerance in basis points (100 = 1%)
 
@@ -128,12 +129,14 @@ interface SwapActions {
   setAppId: (appId: string) => void
   setAppLoaded: (loaded: boolean) => void
   setAppSupportedChains: (chainIds: number[]) => void
+  setAppContracts: (contracts: Record<number, string>) => void
   setContractAddress: (addr: string) => void
   setUnlimitedApproval: (v: boolean) => void
   setSlippageBps: (v: number) => void
   setSolverTokens: (chainId: number, tokens: Token[]) => void
 
   // Form
+  setActiveChain: (chainId: number) => void
   setChainId: (chainId: number) => void
   setSourceChainId: (chainId: number) => void
   setInputToken: (token: Token | null) => void
@@ -203,6 +206,7 @@ const initialState: SwapState = {
   appId: '',
   appLoaded: false,
   contractAddress: '',
+  appContracts: {},
   unlimitedApproval: false,
   slippageBps: 100,  // 1% default
   appSupportedChains: [],
@@ -265,6 +269,7 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   setAppId: (appId) => set({ appId }),
   setAppLoaded: (loaded) => set({ appLoaded: loaded }),
   setAppSupportedChains: (chainIds) => set({ appSupportedChains: Array.from(new Set(chainIds)) }),
+  setAppContracts: (appContracts) => set({ appContracts }),
   setContractAddress: (addr) => set({ contractAddress: addr }),
   setUnlimitedApproval: (v) => set({ unlimitedApproval: v }),
   setSlippageBps: (v) => set({ slippageBps: v }),
@@ -275,6 +280,26 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   }),
 
   // Form
+  setActiveChain: (chainId) => {
+    const tokens = TOKENS[chainId] || []
+    set({
+      chainId,
+      sourceChainId: chainId,
+      isCrossChain: false,
+      inputToken: tokens.find((t) => t.symbol === 'USDC') || tokens[0] || null,
+      outputToken: tokens.find((t) => t.symbol === 'WETH') || tokens.find((t) => t.symbol === 'ETH') || tokens[1] || tokens[0] || null,
+      inputAmount: '',
+      inputBalance: null,
+      outputBalance: null,
+      quote: null,
+      quoteExpiry: null,
+      evmRecipient: '',
+      evmRecipientSource: '',
+      needsApproval: false,
+      needsWrap: false,
+      showDestNetworkSelector: false,
+    })
+  },
   setChainId: (chainId) => {
     const tokens = TOKENS[chainId] || []
     set({

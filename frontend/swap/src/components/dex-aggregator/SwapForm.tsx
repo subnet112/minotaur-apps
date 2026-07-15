@@ -22,7 +22,7 @@ import BracketCorners from '@/components/primitives/BracketCorners'
 import type { ActionState, DesignWalletMode, TokenDisplay } from '@/types'
 import ActionButton from './ActionButton'
 import TokenIcon from './TokenIcon'
-import { CHAIN_CONFIG } from '@/config/chains'
+import { CHAIN_CONFIG, DEX_DEPLOYED_EVM_CHAIN_IDS } from '@/config/chains'
 
 interface SwapFormProps {
   /** Top-line slippage readout. */
@@ -72,10 +72,8 @@ interface SwapFormProps {
   onPickFromChain?: (chainId: number) => void
   onPickToChain?: (chainId: number) => void
   /** When provided, the chain dropdown lists only these chain IDs (intersected
-   *  with CHAIN_CONFIG). Source: appSupportedChains in the store — populated
-   *  from the active App's /v1/apps/{id}/status .deployments filtered by
-   *  order-ready status. When undefined / empty, falls back to all configured
-   *  chains (legacy behavior). */
+   *  with CHAIN_CONFIG). An unavailable deployment response falls back to the
+   *  known DEX V2 EVM deployments, never the full cross-chain catalog. */
   supportedChainIds?: readonly number[]
 
   /** Recipient field — surfaces when `cross && wallet==='bittensor'`. */
@@ -132,6 +130,9 @@ export default function SwapForm(props: SwapFormProps) {
   const [showToDropdown, setShowToDropdown] = useState(false)
   const fromDropdownRef = useRef<HTMLDivElement>(null)
   const toDropdownRef = useRef<HTMLDivElement>(null)
+  const supportedChainIds = props.supportedChainIds?.length
+    ? props.supportedChainIds
+    : DEX_DEPLOYED_EVM_CHAIN_IDS
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -220,7 +221,7 @@ export default function SwapForm(props: SwapFormProps) {
             {showFromDropdown && (
               <div className="sw-chain-dropdown" role="listbox" aria-label="Select source chain">
                 {Object.entries(CHAIN_CONFIG)
-                  .filter(([id]) => !props.supportedChainIds || props.supportedChainIds.length === 0 || props.supportedChainIds.includes(Number(id)))
+                  .filter(([id]) => supportedChainIds.includes(Number(id)))
                   .map(([id, cfg]) => (
                     <button
                       key={id}
@@ -259,7 +260,7 @@ export default function SwapForm(props: SwapFormProps) {
                 {showToDropdown && (
                   <div className="sw-chain-dropdown" role="listbox" aria-label="Select destination chain">
                     {Object.entries(CHAIN_CONFIG)
-                      .filter(([id]) => !props.supportedChainIds || props.supportedChainIds.length === 0 || props.supportedChainIds.includes(Number(id)))
+                      .filter(([id]) => supportedChainIds.includes(Number(id)))
                       .map(([id, cfg]) => (
                         <button
                           key={id}
