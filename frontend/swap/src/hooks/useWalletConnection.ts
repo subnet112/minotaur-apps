@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef } from 'react'
 import { useToast } from '@/components/shell'
 import { useSwapStore } from '../store'
 import { BITTENSOR_CHAIN_ID } from '@/config/chains'
@@ -39,6 +39,8 @@ export function useWalletStateSync() {
   const store = useSwapStore()
   const { address, isConnected } = useAccount()
   const chainId = useChainId()
+  const walletChainInitialized = useRef(false)
+  const previousWalletChainId = useRef<number | null>(null)
 
   useEffect(() => {
     if (store.walletMode !== 'external') return
@@ -50,10 +52,21 @@ export function useWalletStateSync() {
   useEffect(() => {
     if (store.walletMode !== 'external') return
     store.setWalletChainId(chainId ?? null)
-    // RainbowKit's chain modal changes wagmi state directly. Keep the swap
-    // intent, tokens, balances, and contract on that selected deployed chain.
-    if (chainId != null && store.appSupportedChains.includes(chainId) && store.chainId !== chainId) {
-      store.setActiveChain(chainId)
+    // A connected wallet may already be on Ethereum when the app opens on its
+    // Base default. Preserve that default and present the explicit
+    // wrong-network CTA; only reconcile a subsequent user-initiated wallet
+    // network change.
+    if (!walletChainInitialized.current) {
+      if (chainId != null) {
+        walletChainInitialized.current = true
+        previousWalletChainId.current = chainId
+      }
+      return
+    }
+    const hasChangedChain = chainId != null && chainId !== previousWalletChainId.current
+    previousWalletChainId.current = chainId ?? null
+    if (hasChangedChain && store.appSupportedChains.includes(chainId!) && store.chainId !== chainId) {
+      store.setActiveChain(chainId!)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chainId, store.walletMode, store.appSupportedChains])
