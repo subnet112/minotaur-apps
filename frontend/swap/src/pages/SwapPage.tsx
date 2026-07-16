@@ -184,7 +184,6 @@ export default function SwapPage() {
   const setShowDebug = useSwapStore((s) => s.setShowDebug)
   const swapTokens = useSwapStore((s) => s.swapTokens)
   const setActiveChain = useSwapStore((s) => s.setActiveChain)
-  const setChainId = useSwapStore((s) => s.setChainId)
   const sourceChainId = useSwapStore((s) => s.sourceChainId)
   const chainId = useSwapStore((s) => s.chainId)
   const inputBalance = useSwapStore((s) => s.inputBalance)
@@ -192,6 +191,7 @@ export default function SwapPage() {
   const slippageBps = useSwapStore((s) => s.slippageBps)
   const loading = useSwapStore((s) => s.loading)
   const solverTokens = useSwapStore((s) => s.solverTokens)
+  const error = useSwapStore((s) => s.error)
 
   // Map solver tokens for active source chain into TokenDisplay for the modal
   const modalTokens = useMemo(
@@ -276,7 +276,7 @@ export default function SwapPage() {
       return
     }
     if (actionState === 'wrong-network') {
-      // Wallet handles chain switching — nothing to do here
+      void wallet.switchChain(sourceChainId)
       return
     }
     if (isFundsAction) {
@@ -434,22 +434,18 @@ export default function SwapPage() {
               }
               toUsd=""
               toIsQuoted={!!quote && !loading}
-              cross={isCrossChain}
-              onToggleCross={() => useSwapStore.setState({ isCrossChain: !isCrossChain })}
+              cross={false}
+              onToggleCross={() => {}}
               onChangeAmount={(v) => useSwapStore.getState().setInputAmount(v)}
               onMaxClick={() => {
                 const bal = useSwapStore.getState().inputBalance
                 if (bal && bal !== '0') useSwapStore.getState().setInputAmount(bal)
               }}
-              onPickFromChain={(id) => {
+              onPickFromChain={async (id) => {
                 // Cross-chain swaps are not available yet, so the visible
                 // picker always changes both sides of a same-chain swap.
                 setActiveChain(id)
-                void wallet.switchChain(id)
-              }}
-              onPickToChain={(id) => {
-                setChainId(id)
-                void wallet.switchChain(id)
+                await wallet.switchChain(id)
               }}
               showRecipient={isCrossChain && walletMode === 'bittensor'}
               recipientValid={
@@ -474,10 +470,15 @@ export default function SwapPage() {
               wallet={designWallet}
               actionState={actionState}
               onActionClick={handleFormAction}
+              error={error ?? undefined}
+              forceActionLabel={
+                actionState === 'wrong-network'
+                  ? `Switch to ${CHAIN_CONFIG[sourceChainId]?.name ?? 'selected network'}`
+                  : formActionLabel
+              }
               acknowledged={accepted}
               onAcknowledgedChange={setAccepted}
               disclaimerFlash={betaFlash}
-              forceActionLabel={formActionLabel}
             />
           )}
 

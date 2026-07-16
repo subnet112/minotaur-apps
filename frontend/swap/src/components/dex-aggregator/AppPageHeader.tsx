@@ -33,7 +33,7 @@ export default function AppPageHeader({ actions }: AppPageHeaderProps) {
         </h1>
         <p className="app-ph-tag">
           <span className="glyph" aria-hidden="true" />
-          <span>Cross-chain DEX aggregation</span>
+          <span>DEX aggregation on Base &amp; Ethereum</span>
         </p>
       </div>
 

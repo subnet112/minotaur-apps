@@ -42,7 +42,7 @@ export function useApproval() {
   // provider (Firefox/SpiderMonkey) throws a raw "null has no properties"
   // TypeError, which viem relays verbatim as a fake "approve reverted" reason.
   const { data: walletClient } = useWalletClient({ chainId })
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const { switchChainAsync } = useSwitchChain()
 
   useEffect(() => {

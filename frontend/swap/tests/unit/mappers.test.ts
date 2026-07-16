@@ -99,8 +99,19 @@ describe('mapStoreToSwapFormProps', () => {
     const props = mapStoreToSwapFormProps(s as any)
     expect(props.fromChainName).toBe('Ethereum')
     expect(props.fromChainGlyph).toBe('E')
+    expect(props.fromChainIconClass).toBe('eth')
     expect(props.cross).toBe(false)
     expect(props.toChainName).toBeUndefined()
+  })
+
+  it('uses the Base badge class for Base selections', () => {
+    const props = mapStoreToSwapFormProps({
+      ...baseFormState(),
+      sourceChainId: 8453,
+      chainId: 8453,
+    } as any)
+    expect(props.fromChainName).toBe('Base')
+    expect(props.fromChainIconClass).toBe('base')
   })
 
   it('surfaces second chain pill when isCrossChain is true', () => {
