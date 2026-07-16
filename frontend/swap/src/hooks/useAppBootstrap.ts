@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useSwapStore } from '../store'
-import { TOKENS } from '@/config/chains'
+import { DEX_DEPLOYED_EVM_CHAIN_IDS, TOKENS } from '@/config/chains'
 import type { Token } from '../types'
 import * as api from '@/api/client'
 
@@ -17,61 +17,68 @@ import * as api from '@/api/client'
 export const CONFIGURED_APP_ID: string =
   (import.meta.env.VITE_APP_ID as string | undefined)?.trim() || 'app_0867cdd4effd'
 
+async function loadTokensForChain(chainId: number) {
+  try {
+    const res = await api.getChainTokens(chainId)
+    const solverTokens: Token[] = res.tokens.map((t) => ({
+      symbol: t.symbol,
+      name: t.symbol,
+      address: t.address,
+      decimals: t.decimals,
+      icon: t.symbol === 'WETH' || t.symbol === 'ETH' ? '\u27E0' : t.symbol === 'USDC' || t.symbol === 'USDT' || t.symbol === 'DAI' ? '$' : t.symbol[0],
+      logoURI: t.logoURI,
+    }))
+    const hardcoded = TOKENS[chainId] || []
+    const nativeToken = hardcoded.find((t) => t.native)
+    const tokens = nativeToken && !solverTokens.some((t) => t.native || t.address === nativeToken.address)
+      ? [nativeToken, ...solverTokens]
+      : solverTokens
+    const store = useSwapStore.getState()
+    store.setSolverTokens(chainId, tokens)
+    if (store.chainId !== chainId) return
+    if (store.inputToken) {
+      const match = tokens.find((x) => x.address.toLowerCase() === store.inputToken!.address.toLowerCase())
+      if (match) store.setInputToken(match)
+    }
+    if (store.outputToken) {
+      const match = tokens.find((x) => x.address.toLowerCase() === store.outputToken!.address.toLowerCase())
+      if (match) store.setOutputToken(match)
+    }
+    if (!store.inputToken) store.setInputToken(tokens.find((x) => x.symbol === 'USDC') || tokens[0] || null)
+    if (!store.outputToken) store.setOutputToken(tokens.find((x) => x.symbol === 'WETH') || tokens[1] || null)
+  } catch (err) {
+    console.error('[swap] solver token fetch failed:', err)
+    const store = useSwapStore.getState()
+    if (store.chainId !== chainId) return
+    const tokens = TOKENS[chainId] || []
+    if (!store.inputToken) store.setInputToken(tokens.find((x) => x.symbol === 'USDC') || tokens[0] || null)
+    if (!store.outputToken) store.setOutputToken(tokens.find((x) => x.symbol === 'WETH' || x.symbol === 'ETH') || tokens[1] || null)
+  }
+}
+
 /**
  * Bootstrap hook: loads history, fetches solver tokens, discovers apps/contracts.
  * Runs once on mount.
  */
 export function useAppBootstrap() {
   const store = useSwapStore()
+  const chainId = useSwapStore((s) => s.chainId)
+  const appContracts = useSwapStore((s) => s.appContracts)
+
+  useEffect(() => {
+    console.log('[swap] fetching token list for chain', chainId)
+    void loadTokensForChain(chainId)
+  }, [chainId])
+
+  useEffect(() => {
+    const contractAddress = appContracts[chainId]
+    if (contractAddress && contractAddress !== useSwapStore.getState().contractAddress) {
+      useSwapStore.getState().setContractAddress(contractAddress)
+    }
+  }, [appContracts, chainId])
 
   useEffect(() => {
     store.loadHistory()
-
-    // Fetch the token catalog (Superchain Token List) for the current chain
-    console.log('[swap] fetching token list for chain', store.chainId)
-    api.getChainTokens(store.chainId).then((res) => {
-      const solverTokens: Token[] = res.tokens.map((t) => ({
-        symbol: t.symbol,
-        name: t.symbol,
-        address: t.address,
-        decimals: t.decimals,
-        icon: t.symbol === 'WETH' || t.symbol === 'ETH' ? '\u27E0' : t.symbol === 'USDC' || t.symbol === 'USDT' || t.symbol === 'DAI' ? '$' : t.symbol[0],
-        logoURI: t.logoURI,
-      }))
-
-      // The token list contains only ERC-20s. Inject the native token
-      // (ETH/TAO) from the hardcoded config so users can swap native assets
-      // seamlessly — the contract wraps msg.value internally via
-      // _fundAndExecute.
-      const hardcoded = TOKENS[store.chainId] || []
-      const nativeToken = hardcoded.find((t) => t.native)
-      const tokens = nativeToken && !solverTokens.some((t) => t.native || t.address === nativeToken.address)
-        ? [nativeToken, ...solverTokens]
-        : solverTokens
-
-      console.log(`[swap] token list loaded for chain ${store.chainId}:`, tokens.length, tokens.map(t => t.symbol))
-      store.setSolverTokens(store.chainId, tokens)
-
-      // Update selected tokens to matching solver token objects (preserves
-      // address match but picks up correct decimals/symbol from solver)
-      if (store.inputToken) {
-        const match = tokens.find((x) => x.address.toLowerCase() === store.inputToken!.address.toLowerCase())
-        if (match) store.setInputToken(match)
-      }
-      if (store.outputToken) {
-        const match = tokens.find((x) => x.address.toLowerCase() === store.outputToken!.address.toLowerCase())
-        if (match) store.setOutputToken(match)
-      }
-      // Fallback if nothing selected yet
-      if (!store.inputToken) store.setInputToken(tokens.find((x) => x.symbol === 'USDC') || tokens[0] || null)
-      if (!store.outputToken) store.setOutputToken(tokens.find((x) => x.symbol === 'WETH') || tokens[1] || null)
-    }).catch((err) => {
-      console.error('[swap] solver token fetch failed:', err)
-      // Fallback to hardcoded tokens
-      const t = TOKENS[store.chainId] || []
-      if (!store.inputToken) store.setInputToken(t.find((x) => x.symbol === 'USDC') || t[0] || null)
-      if (!store.outputToken) store.setOutputToken(t.find((x) => x.symbol === 'WETH' || x.symbol === 'ETH') || t[1] || null)
-    })
 
     // Find the first order-ready app (DexAggregatorApp) and its contract address.
     //
@@ -107,20 +114,21 @@ export function useAppBootstrap() {
           // Surface the set of order-ready chain IDs so the chain selector
           // can restrict its options to where this App is actually deployed
           // (instead of every chain the validator knows about).
-          const orderReadyChains = (depValues as any[])
+          const orderReadyDeployments = (depValues as any[])
             .filter((d) => d?.contract_address && ORDER_READY.has(d?.status))
-            .map((d) => Number(d.chain_id))
-            .filter((id) => Number.isFinite(id))
-          const supported = Array.from(new Set(orderReadyChains))
+            .map((d) => ({ chainId: Number(d.chain_id), contractAddress: String(d.contract_address) }))
+            .filter((d) => Number.isFinite(d.chainId) && DEX_DEPLOYED_EVM_CHAIN_IDS.includes(d.chainId as typeof DEX_DEPLOYED_EVM_CHAIN_IDS[number]))
+          const supported = Array.from(new Set(orderReadyDeployments.map((d) => d.chainId)))
+          const appContracts = Object.fromEntries(orderReadyDeployments.map((d) => [d.chainId, d.contractAddress]))
           store.setAppSupportedChains(supported)
+          store.setAppContracts(appContracts)
           console.log('[swap] app supported chains:', supported)
 
           // If the current chainId isn't in the supported set, snap to the
           // first supported one — otherwise the form sits with a chain the
           // app can't service.
           if (supported.length > 0 && !supported.includes(store.chainId)) {
-            store.setChainId(supported[0])
-            store.setSourceChainId(supported[0])
+            store.setActiveChain(supported[0])
           }
 
           // Prefer a deployment on the (possibly newly-snapped) current chain;
