@@ -306,8 +306,10 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
   // atomic path so an internal mutation cannot create a hidden bridge route.
   setChainId: (chainId) => get().setActiveChain(chainId),
   setSourceChainId: (chainId) => get().setActiveChain(chainId),
-  setInputToken: (token) => set({ inputToken: token, quote: null }),
-  setOutputToken: (token) => set({ outputToken: token, quote: null }),
+  // Clear the displayed balance synchronously. The balance hook then fills it
+  // for the newly-selected asset; retaining the old value is misleading.
+  setInputToken: (token) => set({ inputToken: token, inputBalance: null, quote: null }),
+  setOutputToken: (token) => set({ outputToken: token, outputBalance: null, quote: null }),
   setInputAmount: (amount) => set({ inputAmount: amount }),
   setInputBalance: (balance) => set({ inputBalance: balance }),
   setOutputBalance: (balance) => set({ outputBalance: balance }),
