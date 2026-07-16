@@ -31,6 +31,15 @@ describe('useSwapStore', () => {
     expect(useSwapStore.getState().inputAmount).toBe('123')
   })
 
+  it('clears a stale balance when selecting a token', () => {
+    useSwapStore.setState({ inputBalance: '42', outputBalance: '7' })
+    useSwapStore.getState().setInputToken({ symbol: 'USDC', address: '0x1', decimals: 6 } as any)
+    useSwapStore.getState().setOutputToken({ symbol: 'WETH', address: '0x2', decimals: 18 } as any)
+
+    expect(useSwapStore.getState().inputBalance).toBeNull()
+    expect(useSwapStore.getState().outputBalance).toBeNull()
+  })
+
   it('setChainId clears quote', () => {
     useSwapStore.setState({ quote: { foo: 1 } as any })
     useSwapStore.getState().setChainId(8453)
