@@ -46,6 +46,8 @@ describe('useSwapStore', () => {
       quote: { foo: 1 } as any,
       evmRecipient: '0x123',
       showDestNetworkSelector: true,
+      error: 'Base RPC unavailable',
+      appContracts: { 1: '0xEthereumContract', 8453: '0xBaseContract' },
     })
 
     useSwapStore.getState().setActiveChain(1)
@@ -60,6 +62,8 @@ describe('useSwapStore', () => {
     expect(state.quote).toBeNull()
     expect(state.evmRecipient).toBe('')
     expect(state.showDestNetworkSelector).toBe(false)
+    expect(state.contractAddress).toBe('0xEthereumContract')
+    expect(state.error).toBeNull()
   })
 
   it('swapTokens flips input/output and clears amount', () => {
