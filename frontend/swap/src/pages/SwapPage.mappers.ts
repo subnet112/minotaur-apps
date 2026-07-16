@@ -68,7 +68,7 @@ function chainDisplay(chainId: number): { name: string; glyph: string; iconClass
     return {
       name: cfg.name,
       glyph: cfg.name.charAt(0).toUpperCase(),
-      iconClass: cfg.name.toLowerCase().split(' ')[0],
+      iconClass: chainId === 1 ? 'eth' : chainId === 8453 ? 'base' : cfg.name.toLowerCase().split(' ')[0],
     }
   }
   return { name: `Chain ${chainId}`, glyph: '?', iconClass: 'unknown' }

@@ -104,6 +104,8 @@ interface SwapFormProps {
   /** Action button state — driven from page state. */
   actionState: ActionState
   onActionClick: () => void
+  /** Recoverable quote, RPC, or chain-switch failure for the active swap. */
+  error?: string
 
   /** Alpha-risk acknowledgement. The Swap/Sign action is blocked until the
    *  user ticks the disclaimer; the page shares this with the Approve CTA so
@@ -280,23 +282,17 @@ export default function SwapForm(props: SwapFormProps) {
               </div>
             </>
           )}
-          <button
-            className={`sw-xchain ${props.cross ? 'is-on' : ''}`.trim()}
-            type="button"
-            aria-pressed={props.cross}
-            aria-disabled={!props.crossChainEnabled}
-            disabled={!props.crossChainEnabled}
-            onClick={props.crossChainEnabled ? props.onToggleCross : undefined}
-            title={props.crossChainEnabled ? undefined : 'Cross-chain swaps coming soon'}
-            style={
-              !props.crossChainEnabled
-                ? { opacity: 0.45, cursor: 'not-allowed' }
-                : undefined
-            }
-          >
-            <span className="glyph" aria-hidden="true" />
-            {!props.cross && <span>Cross-chain</span>}
-          </button>
+          {props.crossChainEnabled && (
+            <button
+              className={`sw-xchain ${props.cross ? 'is-on' : ''}`.trim()}
+              type="button"
+              aria-pressed={props.cross}
+              onClick={props.onToggleCross}
+            >
+              <span className="glyph" aria-hidden="true" />
+              {!props.cross && <span>Cross-chain</span>}
+            </button>
+          )}
         </div>
 
         {/* FROM */}
@@ -434,6 +430,9 @@ export default function SwapForm(props: SwapFormProps) {
             )
           }
         />
+        {props.error && (
+          <p className="sw-form-error" role="alert">{props.error}</p>
+        )}
 
         {/* Approval help text moved to SwapReviewCard — the form's button
             now says "Review swap →" for the approve/swap-ready/sign-broadcast

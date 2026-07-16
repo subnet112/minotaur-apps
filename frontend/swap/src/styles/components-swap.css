@@ -897,6 +897,14 @@
   color: var(--surf-onyx, var(--onyx));
 }
 
+.sw-form-error {
+  margin: 10px 0 0;
+  color: var(--cretan);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 /* =========================================================================
    00.28 · QUOTE INFO CARD (.sw-quote)
    ========================================================================= */
