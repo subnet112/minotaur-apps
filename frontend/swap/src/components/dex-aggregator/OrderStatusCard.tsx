@@ -74,15 +74,19 @@ export default function OrderStatusCard({
   // step index + flags). A client-side stall (validators never scored the
   // order) is also a failure: fold it into the failed/terminal treatment.
   const { stepIdx, isFailed: statusFailed, isTerminal: statusTerminal } = classifyOrderStatus(step)
-  const isFailed = statusFailed || stalled
-  const isTerminal = statusTerminal || stalled
+  // The API normally moves failures to a terminal status, but some backend
+  // paths attach an error before (or without) advancing the status. An
+  // actionable error is more useful than a misleading in-progress stepper.
+  const hasFailureReason = !!errorMessage?.trim()
+  const isFailed = statusFailed || stalled || hasFailureReason
+  const isTerminal = statusTerminal || stalled || hasFailureReason
 
   // Where to freeze the stepper + which node to mark failed:
   //   - stalled       → the actual reached node (e.g. SOLVED) — show how far it got
   //   - backend-failed → the 'open' node (idx 1), per the prototype
   //   - otherwise      → the live node
-  const currentIdx = stalled ? Math.max(stepIdx, 0) : statusFailed ? 1 : stepIdx
-  const failedIdx = stalled ? currentIdx : statusFailed ? 1 : -1
+  const currentIdx = stalled ? Math.max(stepIdx, 0) : (statusFailed || hasFailureReason) ? 1 : stepIdx
+  const failedIdx = stalled ? currentIdx : (statusFailed || hasFailureReason) ? 1 : -1
 
   // Lime segment geometry. The 6 nodes sit at evenly-spaced positions
   // (12 columns, each node at 1/12 + idx*2/12 = 8.33% + idx*16.66%).
@@ -105,6 +109,7 @@ export default function OrderStatusCard({
   const showSurplus = surplus != null && currentIdx >= 5
   const showFee = fee != null && currentIdx >= 4
   const showGas = gas != null && currentIdx >= 4
+  const unavailable = isFailed ? 'Not available' : 'Awaiting execution'
 
   // Short display of order ID for the header (#xxxxx)
   const orderIdShort = orderId ? `#${orderId.slice(0, 5)}` : '#—'
@@ -147,7 +152,7 @@ export default function OrderStatusCard({
               filled in the card header. A client-side stall reads as "stalled"
               rather than its frozen raw status (e.g. "solved"). */}
           {isTerminal && (
-            <span className="v">&nbsp;·&nbsp;{stalled ? 'stalled' : step}</span>
+            <span className="v">&nbsp;·&nbsp;{stalled ? 'stalled' : isFailed ? 'failed' : step}</span>
           )}
         </span>
       </div>
@@ -201,37 +206,37 @@ export default function OrderStatusCard({
           <div className="row">
             <span className="k">Quality</span>
             <span className={`v ${showQuality ? '' : 'dim'}`.trim()}>
-              {showQuality && qualityPct != null ? `${qualityPct.toFixed(1)}%` : '—'}
+              {showQuality && qualityPct != null ? `${qualityPct.toFixed(1)}%` : isFailed ? 'Not available' : 'Awaiting score'}
             </span>
           </div>
           <div className="row">
             <span className="k">Plan</span>
             <span className={`v ${showValid ? '' : 'dim'}`.trim()}>
-              {showValid && score != null ? (Number(score) > 0 ? 'valid' : 'invalid') : '—'}
+              {showValid && score != null ? (Number(score) > 0 ? 'valid' : 'invalid') : isFailed ? 'Not available' : 'Awaiting plan'}
             </span>
           </div>
           <div className="row">
             <span className="k" title="Amount delivered to you — the gross swap output minus the app's surplus fee below.">Output</span>
             <span className={`v ${showOutput ? '' : 'dim'}`.trim()}>
-              {showOutput && output ? output : '—'}
+              {showOutput && output ? output : unavailable}
             </span>
           </div>
           <div className="row">
             <span className="k" title="Positive slippage: how much the swap beat your minimum output.">Surplus</span>
             <span className={`v ${showSurplus ? 'lime' : 'dim'}`.trim()}>
-              {showSurplus && surplus ? `+${surplus}` : '—'}
+              {showSurplus && surplus ? `+${surplus}` : unavailable}
             </span>
           </div>
           <div className="row">
             <span className="k" title="App fee (V2): the app's share of the surplus above your quote — taken from the output, not charged on top. The protocol fee is paid separately by the app, not by you.">App fee</span>
             <span className={`v ${showFee ? '' : 'dim'}`.trim()}>
-              {showFee && fee ? fee : '—'}
+              {showFee && fee ? fee : unavailable}
             </span>
           </div>
           <div className="row">
             <span className="k">Gas</span>
             <span className={`v ${showGas ? '' : 'dim'}`.trim()}>
-              {showGas && gas ? gas : '—'}
+              {showGas && gas ? gas : unavailable}
             </span>
           </div>
 
