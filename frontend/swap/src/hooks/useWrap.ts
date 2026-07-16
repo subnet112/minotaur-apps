@@ -33,7 +33,7 @@ export function useWrap() {
   // unbound useWalletClient() causes a wallet-side "null has no properties".
   const chainId = useSwapStore((s) => s.chainId)
   const { data: walletClient } = useWalletClient({ chainId })
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId })
   const { switchChainAsync } = useSwitchChain()
 
   const wrap = useCallback(async () => {

@@ -286,6 +286,7 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
       chainId,
       sourceChainId: chainId,
       isCrossChain: false,
+      contractAddress: get().appContracts[chainId] ?? '',
       inputToken: tokens.find((t) => t.symbol === 'USDC') || tokens[0] || null,
       outputToken: tokens.find((t) => t.symbol === 'WETH') || tokens.find((t) => t.symbol === 'ETH') || tokens[1] || tokens[0] || null,
       inputAmount: '',
@@ -298,29 +299,13 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
       needsApproval: false,
       needsWrap: false,
       showDestNetworkSelector: false,
+      error: null,
     })
   },
-  setChainId: (chainId) => {
-    const tokens = TOKENS[chainId] || []
-    set({
-      chainId,
-      isCrossChain: chainId !== get().sourceChainId,
-      outputToken: tokens.find((t) => t.symbol === 'USDC') || tokens[0] || null,
-      quote: null,
-      quoteExpiry: null,
-      showDestNetworkSelector: false,
-    })
-  },
-  setSourceChainId: (sourceChainId) => {
-    const tokens = TOKENS[sourceChainId] || []
-    set({
-      sourceChainId,
-      isCrossChain: sourceChainId !== get().chainId,
-      inputToken: tokens[0] || null,
-      quote: null,
-      quoteExpiry: null,
-    })
-  },
+  // Cross-chain swaps are not shipped. Keep legacy callers on the same
+  // atomic path so an internal mutation cannot create a hidden bridge route.
+  setChainId: (chainId) => get().setActiveChain(chainId),
+  setSourceChainId: (chainId) => get().setActiveChain(chainId),
   setInputToken: (token) => set({ inputToken: token, quote: null }),
   setOutputToken: (token) => set({ outputToken: token, quote: null }),
   setInputAmount: (amount) => set({ inputAmount: amount }),
@@ -412,7 +397,13 @@ export const useSwapStore = create<SwapState & SwapActions>((set, get) => ({
       })
       set({ needsApproval: BigInt(allowance as bigint) < want })
     } catch {
-      set({ needsApproval: false, needsWrap: false })
+      // Do not treat an unavailable RPC as an approved allowance: doing so
+      // lets the user advance into a transaction that will fail on-chain.
+      set({
+        needsApproval: !isNative,
+        needsWrap: isNative,
+        error: `Unable to verify allowance on ${CHAIN_CONFIG[s.chainId]?.name ?? 'the selected network'}. Try again shortly.`,
+      })
     }
   },
 

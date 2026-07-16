@@ -23,7 +23,7 @@ import type { Chain } from 'viem'
 const PUBLIC_RPC_BASE =
   (import.meta.env.VITE_BASE_RPC_URL as string | undefined)?.trim() || 'https://mainnet.base.org'
 const PUBLIC_RPC_ETH =
-  (import.meta.env.VITE_ETH_RPC_URL as string | undefined)?.trim() || 'https://eth.llamarpc.com'
+  (import.meta.env.VITE_ETH_RPC_URL as string | undefined)?.trim() || 'https://ethereum-rpc.publicnode.com'
 
 // ──────────────────────────────────────────────────────────────────────
 // Chain list. Should match the DexAggregator's deployed chains. V2 is on

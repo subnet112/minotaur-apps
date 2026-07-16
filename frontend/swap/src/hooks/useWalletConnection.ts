@@ -50,8 +50,13 @@ export function useWalletStateSync() {
   useEffect(() => {
     if (store.walletMode !== 'external') return
     store.setWalletChainId(chainId ?? null)
+    // RainbowKit's chain modal changes wagmi state directly. Keep the swap
+    // intent, tokens, balances, and contract on that selected deployed chain.
+    if (chainId != null && store.appSupportedChains.includes(chainId) && store.chainId !== chainId) {
+      store.setActiveChain(chainId)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chainId, store.walletMode])
+  }, [chainId, store.walletMode, store.appSupportedChains])
 }
 
 /** Back-compat re-export — old import-site name. Behaviour is identical. */
@@ -80,19 +85,23 @@ export function useWalletConnection() {
     disconnect()
   }, [disconnect])
 
-  const switchChain = useCallback(async (targetChainId: number): Promise<void> => {
+  const switchChain = useCallback(async (targetChainId: number): Promise<boolean> => {
     try {
       await switchChainAsync({ chainId: targetChainId })
+      return true
     } catch (e) {
       // wagmi throws on user rejection (UserRejectedRequestError) and on
       // chains the connected wallet doesn't know about. The injected
       // connector tries wallet_addEthereumChain when the chain is in our
       // wagmi config but missing from the wallet, so 4902 cases are
-      // handled internally. We silently swallow rejection — the UI
-      // already reflects the current wallet chain via useChainId.
       console.warn('[wallet] switchChain failed:', e)
+      toast.error({
+        title: 'Network switch cancelled',
+        message: 'Your wallet must be on the selected network to continue.',
+      })
+      return false
     }
-  }, [switchChainAsync])
+  }, [switchChainAsync, toast])
 
   // Back-compat flag — every wagmi-supported wallet looks "connectable" to
   // the UI. Don't gate behaviour on this; gate on `s.walletConnected`.

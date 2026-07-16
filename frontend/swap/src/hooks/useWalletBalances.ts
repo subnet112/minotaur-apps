@@ -96,5 +96,5 @@ export function useWalletBalances() {
     // F7: Abort in-flight fetch on cleanup
     return () => { controller.abort() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.walletAddress, store.inputToken, store.outputToken, store.chainId, store.walletMode, store.sourceChainId, store.bittensorAddress, store.bittensorConnected])
+  }, [store.walletAddress, store.inputToken, store.outputToken, store.chainId, store.walletMode, store.sourceChainId, store.isCrossChain, store.bittensorAddress, store.bittensorConnected])
 }
