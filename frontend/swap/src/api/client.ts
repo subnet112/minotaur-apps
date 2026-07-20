@@ -9,6 +9,7 @@
 
 import { DEFAULT_CHAIN_ID } from '@/config/chains'
 import { AERODROME_BASE_TOKENS } from '@/config/aerodrome-base-tokens'
+import { ETHEREUM_TOKENS } from '@/config/ethereum-tokens'
 
 const BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}`
@@ -65,7 +66,7 @@ export function getChains(): Promise<{ chains: ChainInfo[] }> {
 // routable and the live quote is the real check. Tokens not on the lists can
 // still be added by pasting their address (SwapPage custom import).
 //
-// Two sources, merged + deduped:
+// Sources, merged + deduped:
 //   • Superchain Token List — keyless static CDN JSON (Token Lists standard),
 //     covers all supported chains; the required backbone (fetched at runtime).
 //   • AERODROME_BASE_TOKENS — a hardcoded snapshot of Aerodrome's whitelisted
@@ -73,10 +74,15 @@ export function getChains(): Promise<{ chains: ChainInfo[] }> {
 //     token-list API; the snapshot comes from its on-chain Sugar lens (see
 //     config/aerodrome-base-tokens.ts + infra/refresh-aerodrome-tokens.md).
 //     Base-only, bundled at build time (no runtime fetch, no CORS).
+//   • ETHEREUM_TOKENS — a hardcoded snapshot of the Uniswap Labs Default list
+//     (chain 1) plus wTAO, adding the curated Ethereum long tail the Superchain
+//     backbone omits (see config/ethereum-tokens.ts +
+//     infra/refresh-ethereum-tokens.md). Ethereum-only, bundled at build time.
 
 export const TOKEN_LIST_URL = 'https://static.optimism.io/optimism.tokenlist.json'
 
 const BASE_CHAIN_ID = 8453
+const ETH_CHAIN_ID = 1
 
 export interface SolverToken {
   address: string
@@ -146,11 +152,13 @@ export async function getChainTokens(
   const superchain = dedupeByAddress(await fetchSuperchainTokens(chainId))
   let tokens = superchain
 
-  // Aerodrome's whitelist is Base-only — merge the bundled snapshot for the
-  // Aero-native long tail. It's a static import (no fetch, can't fail).
-  // Superchain entries win on overlap (curated metadata + checksummed addr).
+  // Merge the chain's bundled snapshot for the curated long tail the Superchain
+  // backbone omits. Static imports (no fetch, can't fail). Superchain entries
+  // win on overlap (curated metadata + checksummed addr), so they lead the array.
   if (chainId === BASE_CHAIN_ID) {
     tokens = dedupeByAddress([...superchain, ...AERODROME_BASE_TOKENS])
+  } else if (chainId === ETH_CHAIN_ID) {
+    tokens = dedupeByAddress([...superchain, ...ETHEREUM_TOKENS])
   }
 
   // Give every token a logo URL: its own (Superchain) when present, else the
