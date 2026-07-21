@@ -88,6 +88,28 @@ and redeploy. The frontend then talks only to this BFF — same-origin-friendly,
 cached, and fast. **Don't flip this until the box is live**, or the site would
 point at a backend that doesn't exist yet.
 
+## Redeploying (manual)
+
+The box's security group keeps **no public SSH** open. To ship a new build,
+`scripts/redeploy.sh` opens `tcp/22` to *only your current IP*, ships the
+current `backend/` source, runs `docker compose up -d --build` on the box, and
+revokes the SSH rule again (even on failure). It never touches the box's `.env`,
+so the RPC keys there are preserved.
+
+```bash
+cd backend
+./scripts/redeploy.sh          # needs awscli + the deploy key (~/.ssh/minotaur-swap-backend.pem)
+```
+
+Override targets via env (`REGION`, `SG`, `HOST`, `KEY`) if the instance changes.
+To change env/RPC keys, edit `/opt/swap-backend/.env` during a deploy window
+(open SSH the same way) and `docker compose up -d`.
+
+> A private-ECR CI pipeline was considered but isn't possible under the current
+> AWS identity (it's denied all IAM, so neither a CI OIDC push-role nor an
+> instance pull-role can be created). This script is the no-SSH-by-default
+> manual path instead.
+
 ## Notes
 
 - Stateless and horizontally scalable; the cache is per-instance (in-memory).
