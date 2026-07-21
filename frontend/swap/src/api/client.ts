@@ -11,12 +11,26 @@ import { DEFAULT_CHAIN_ID } from '@/config/chains'
 import { AERODROME_BASE_TOKENS } from '@/config/aerodrome-base-tokens'
 import { ETHEREUM_TOKENS } from '@/config/ethereum-tokens'
 
-const BASE = import.meta.env.VITE_API_URL
+// Source of truth = the validator. VITE_EDGE_API_URL, when set, is the
+// swap-backend BFF used for cacheable/offloadable READS only (balances,
+// chains, tokens…). Writes — quotes, orders, prepare, signatures — ALWAYS go
+// straight to the validator, so the BFF is never on the mutation/quote path.
+const VALIDATOR_BASE = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}`
   : '/api'
+const EDGE_BASE = import.meta.env.VITE_EDGE_API_URL
+  ? `${import.meta.env.VITE_EDGE_API_URL}`
+  : VALIDATOR_BASE
+/** Fail a hung edge read fast so it falls back to the validator quickly. */
+const EDGE_READ_TIMEOUT_MS = 8_000
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+function isReadInit(init?: RequestInit): boolean {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  return method === 'GET' || method === 'HEAD'
+}
+
+async function fetchFrom<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${base}${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
@@ -30,6 +44,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(200, String(data.error))
   }
   return data as T
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Writes, and the no-edge case: straight to the validator.
+  if (EDGE_BASE === VALIDATOR_BASE || !isReadInit(init)) {
+    return fetchFrom<T>(VALIDATOR_BASE, path, init)
+  }
+  // Reads: try the edge (bounded), fall back to the validator only on an
+  // outage (network error / 5xx) — never on a 4xx or a 200-{error}, which are
+  // real answers the validator would give identically.
+  try {
+    if (init?.signal) return await fetchFrom<T>(EDGE_BASE, path, init)
+    const ctrl = new AbortController()
+    const timer = window.setTimeout(() => ctrl.abort(), EDGE_READ_TIMEOUT_MS)
+    try {
+      return await fetchFrom<T>(EDGE_BASE, path, { ...init, signal: ctrl.signal })
+    } finally {
+      window.clearTimeout(timer)
+    }
+  } catch (err) {
+    const isOutage = !(err instanceof ApiError) || err.status >= 500
+    if (!isOutage) throw err
+    return fetchFrom<T>(VALIDATOR_BASE, path, init)
+  }
 }
 
 export class ApiError extends Error {
