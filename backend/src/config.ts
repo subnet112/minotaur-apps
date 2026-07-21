@@ -36,6 +36,13 @@ export const config = {
     1: str('ETH_RPC_URL', 'https://ethereum-rpc.publicnode.com'),
     8453: str('BASE_RPC_URL', 'https://mainnet.base.org'),
   } as Record<number, string>,
+  /** Optional per-chain `Authorization` header value (e.g. `Bearer <key>`) for
+   *  providers that authenticate by header rather than a key in the URL —
+   *  e.g. Blockmachine (`Bearer bm_live_…`). Empty = no header. */
+  rpcAuth: {
+    1: str('ETH_RPC_AUTH', ''),
+    8453: str('BASE_RPC_AUTH', ''),
+  } as Record<number, string>,
   balancesFallbackToValidator: str('BALANCES_FALLBACK_TO_VALIDATOR', 'false') === 'true',
 
   sharedTtlMs: num('SHARED_TTL_MS', 30_000),

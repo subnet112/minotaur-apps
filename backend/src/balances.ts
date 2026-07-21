@@ -42,9 +42,13 @@ export function supportsChain(chainId: number): boolean {
 }
 
 function publicClient(chainId: number) {
+  const auth = config.rpcAuth[chainId]
   return createPublicClient({
     chain: VIEM_CHAINS[chainId],
-    transport: http(config.rpcUrls[chainId], { batch: true }),
+    transport: http(config.rpcUrls[chainId], {
+      batch: true,
+      ...(auth ? { fetchOptions: { headers: { Authorization: auth } } } : {}),
+    }),
   })
 }
 
