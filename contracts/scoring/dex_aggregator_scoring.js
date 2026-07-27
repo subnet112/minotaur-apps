@@ -124,6 +124,19 @@ var manifest = {
           in_signature: false,
           default: true,
         },
+        dest_chain_id: {
+          type: "uint256",
+          description:
+            "Deliver the output on THIS chain (0 = same chain as the intent). " +
+            "When set, the solver declares a CrossChainPlan and the platform " +
+            "compiles the bridge journey; scoring then credits ONLY what is " +
+            "measured delivered on this chain (see score()). NOT in the " +
+            "on-chain swap signature — same dispatch-selector reasoning as " +
+            "unwrap_output.",
+          source: "user",
+          in_signature: false,
+          default: 0,
+        },
       },
       // Provide ONLY the params the user/system supplies. Do NOT include
       // source:"quote" params (min_output_amount, platform_fee_wei,
@@ -442,7 +455,88 @@ var manifest = {
   ],
 };
 
+// ── Cross-chain intents ─────────────────────────────────────────────────────
+//
+// A swap that names dest_chain_id asks for delivery on ANOTHER chain, so the
+// quantity the contest must compare is what verifiably LANDED there — the
+// platform's destination-leg measurement (context.simulation
+// .destination_delivered, benchmark path only), not what moved on the source
+// chain. The split that keeps this safe everywhere:
+//
+//   raw_output  (benchmark adoption gate, never read on the live path):
+//     the measured destination delivery — or "0" when it is unproven, which
+//     includes a plan that ignored the requested chain entirely. This is the
+//     entire miner incentive: on a cross-chain order, bridging and delivering
+//     beats any same-chain answer, and an unmeasured claim beats nothing.
+//   score/valid (live + follower re-scoring semantics):
+//     UNCHANGED single-chain accounting in every context — the live path
+//     scores per leg and must keep working exactly as it does today.
+//
+// Only "simulated" provenance is credited: "declared" is the plan's own
+// number (inflatable), "unfilled" means the journey never earned the deposit.
+
+function crossChainDest(params, state) {
+  var raw = params.dest_chain_id || params.destChainId || 0;
+  var dest = parseInt(String(raw), 10) || 0;
+  var here = state.chain_id || state.chainId || 0;
+  return dest > 0 && dest !== here ? dest : 0;
+}
+
+function measuredDestinationDelivery(sim) {
+  var dd = sim.destination_delivered !== undefined
+    ? sim.destination_delivered
+    : sim.destinationDelivered;
+  if (dd === undefined || dd === null) return null; // not the benchmark path
+  var src = sim.destination_amount_source || sim.destinationAmountSource || "";
+  var amt = src === "simulated" ? toBigIntAmount(dd) : BigInt(0);
+  return amt === null ? BigInt(0) : amt;
+}
+
 function score(plan, state, context) {
+  var sim = context.simulation || {};
+  var params = runtimeParams(state);
+
+  var destChain = crossChainDest(params, state);
+  if (destChain) {
+    var delivered = measuredDestinationDelivery(sim);
+    if (delivered !== null) {
+      // Benchmark path: the platform measured the destination leg. The
+      // slippage-guard min applies to what arrives on the DESTINATION.
+      var xMin = toBigIntAmount(
+        params.min_output_amount || params.min_amount_out || params.minAmountOut || "0",
+      );
+      if (xMin === null) xMin = BigInt(0);
+      var credited = delivered >= xMin ? delivered : BigInt(0);
+      return {
+        score: credited > BigInt(0) ? 1 : 0,
+        valid: credited > BigInt(0),
+        reason: credited > BigInt(0)
+          ? "Destination delivery measured: " + credited.toString() + " on chain " + destChain
+          : "No measured destination delivery (chain " + destChain + ")",
+        breakdown: { dest_chain_id: destChain, min_amount_out: xMin.toString() },
+        metadata: {
+          raw_output: credited.toString(),
+          output_amount: credited.toString(),
+          min_amount_out: xMin.toString(),
+        },
+      };
+    }
+    // No measurement in this context (live per-leg scoring, quote, or a
+    // plan that never left the source chain): score/valid keep their exact
+    // single-chain semantics for this simulation, but destination delivery
+    // is UNPROVEN, so the adoption signal is pinned to zero.
+    var res = scoreSameChain(plan, state, context);
+    res.metadata = res.metadata || {};
+    res.metadata.raw_output = "0";
+    res.metadata.raw_output_note =
+      "cross-chain intent: destination delivery unmeasured in this context";
+    return res;
+  }
+
+  return scoreSameChain(plan, state, context);
+}
+
+function scoreSameChain(plan, state, context) {
   var sim = context.simulation || {};
 
   // 1. Check simulation success
