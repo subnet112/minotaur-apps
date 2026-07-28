@@ -76,6 +76,12 @@ export const STALL_EXEMPT = new Set<string>([
   'bridging',
   'unstaking',
   'executing_leg',
+  // Cross-chain parked/recovery states: the first two wait on the USER (a
+  // wallet prompt has no deadline we should nag about), refreshing is the
+  // platform re-quoting a failed leg. All are healthy long waits, not stalls.
+  'awaiting_plan_set_signature',
+  'awaiting_user_decision',
+  'refreshing',
 ])
 
 /**
