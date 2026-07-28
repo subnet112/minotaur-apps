@@ -51,6 +51,15 @@ describe('isOrderStalled', () => {
     }
   })
 
+  it('exempts the cross-chain parked/recovery states by their exact API names', () => {
+    // Pinned to the OrderStatus enum values in minotaur_subnet
+    // (orderbook.py) — a rename there must break this test, not the UX.
+    for (const s of ['awaiting_plan_set_signature', 'awaiting_user_decision', 'refreshing']) {
+      expect(STALL_EXEMPT.has(s)).toBe(true)
+      expect(isOrderStalled(s, overTimeout)).toBe(false)
+    }
+  })
+
   it('ignores empty / nullish status', () => {
     expect(isOrderStalled(null, overTimeout)).toBe(false)
     expect(isOrderStalled(undefined, overTimeout)).toBe(false)
