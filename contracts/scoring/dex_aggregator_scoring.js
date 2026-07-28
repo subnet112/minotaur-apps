@@ -119,8 +119,11 @@ var manifest = {
             "Deliver native ETH/TAO instead of the wrapped token. Defaults to " +
             "true; harmless for non-native outputs because the contract only " +
             "unwraps when tokenOut == wrappedNative, so the encoder needs no " +
-            "token-aware logic.",
-          source: "system",
+            "token-aware logic. source=user: this is the CALLER's delivery " +
+            "choice, and the quote-capture allowlist (subnet #1181) keeps " +
+            "exactly source=user params — declared system, two quotes " +
+            "differing only in unwrap collapse to one captured case.",
+          source: "user",
           in_signature: false,
           default: true,
         },
